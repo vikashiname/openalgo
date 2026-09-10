@@ -58,3 +58,9 @@ class ChartSchema(Schema):
 
 class PnlSymbolsSchema(Schema):
     apikey = fields.Str(required=True, validate=validate.Length(min=1, max=256))
+
+
+class AttributedPositionsSchema(Schema):
+    apikey = fields.Str(required=True, validate=validate.Length(min=1, max=256))
+    strategy = fields.Str(required=False, allow_none=True, missing=None)
+    include_zero_residual = fields.Bool(required=False, missing=False)

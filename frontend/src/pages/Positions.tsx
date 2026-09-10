@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  Layers,
   Loader2,
   Pause,
   Radio,
@@ -40,7 +41,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -57,9 +66,13 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
-import type { Position } from '@/types/trading'
+import type {
+  AttributedPositionsData,
+  ContractReconciliation,
+  Position,
+  StrategyPositionItem,
+} from '@/types/trading'
 import { showToast } from '@/utils/toast'
-import { EmptyState } from '@/components/ui/empty-state'
 
 const STORAGE_KEY = 'openalgo_positions_prefs'
 
@@ -76,6 +89,11 @@ interface FilterState {
 interface Preferences {
   grouping: GroupingType
   filters: FilterState
+  strategy?: string
+}
+
+function getContractKey(symbol: string, exchange: string, product: string): string {
+  return `${(symbol || '').trim().toUpperCase()}-${(exchange || '').trim().toUpperCase()}-${(product || '').trim().toUpperCase()}`
 }
 
 function parseSymbol(symbol: string, exchange: string) {
@@ -149,6 +167,10 @@ export default function Positions() {
   const { isCrypto } = useSupportedExchanges()
   const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
   const [positions, setPositions] = useState<Position[]>([])
+  const [attributedData, setAttributedData] = useState<AttributedPositionsData | null>(null)
+  const [expandedContracts, setExpandedContracts] = useState<Set<string>>(new Set())
+  const [selectedStrategy, setSelectedStrategy] = useState<string>('all')
+
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -191,6 +213,7 @@ export default function Positions() {
       if (saved) {
         const prefs: Preferences = JSON.parse(saved)
         if (prefs.grouping) setGrouping(prefs.grouping)
+        if (prefs.strategy) setSelectedStrategy(prefs.strategy)
         if (prefs.filters)
           setFilters({
             product: prefs.filters.product || [],
@@ -203,8 +226,11 @@ export default function Positions() {
 
   // Save preferences to localStorage
   const savePreferences = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ grouping, filters }))
-  }, [grouping, filters])
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ grouping, filters, strategy: selectedStrategy })
+    )
+  }, [grouping, filters, selectedStrategy])
 
   useEffect(() => {
     savePreferences()
@@ -220,13 +246,69 @@ export default function Positions() {
       if (showRefresh) setIsRefreshing(true)
 
       try {
-        const response = await tradingApi.getPositions(apiKey)
-        if (response.status === 'success' && response.data) {
-          setPositions(response.data)
+        const [posResp, attrResp] = await Promise.allSettled([
+          tradingApi.getPositions(apiKey),
+          tradingApi.getAttributedPositions(apiKey, undefined, true),
+        ])
+
+        let basePositions: Position[] = []
+        if (
+          posResp.status === 'fulfilled' &&
+          posResp.value.status === 'success' &&
+          posResp.value.data
+        ) {
+          basePositions = posResp.value.data
           setError(null)
+        } else if (posResp.status === 'fulfilled') {
+          setError(posResp.value.message || 'Failed to fetch positions')
         } else {
-          setError(response.message || 'Failed to fetch positions')
+          setError('Failed to fetch positions')
         }
+
+        if (
+          attrResp.status === 'fulfilled' &&
+          attrResp.value.status === 'success' &&
+          attrResp.value.data
+        ) {
+          const attrData = attrResp.value.data
+          setAttributedData(attrData)
+
+          // Handle Edge Case 1: Strategy opposite positions or contracts present in attribution
+          // where broker_quantity === 0 (or not returned by broker in positionbook).
+          // If a contract exists in attribution but not in basePositions, inject a synthetic position
+          // so that the contract row is rendered and can be expanded.
+          const existingKeys = new Set(
+            basePositions.map((p) => getContractKey(p.symbol, p.exchange, p.product))
+          )
+
+          const syntheticPositions: Position[] = []
+          for (const contract of attrData.contracts) {
+            const key = getContractKey(contract.symbol, contract.exchange, contract.product)
+            if (!existingKeys.has(key)) {
+              const legs = attrData.positions.filter(
+                (p) => getContractKey(p.symbol, p.exchange, p.product) === key
+              )
+              const sampleLeg = legs[0]
+              syntheticPositions.push({
+                symbol: contract.symbol,
+                exchange: contract.exchange,
+                product: contract.product as 'MIS' | 'NRML' | 'CNC',
+                quantity: contract.broker_quantity,
+                average_price: sampleLeg ? sampleLeg.average_price : 0,
+                ltp: sampleLeg ? sampleLeg.ltp : 0,
+                pnl: 0,
+                pnlpercent: 0,
+              })
+              existingKeys.add(key)
+            }
+          }
+
+          if (syntheticPositions.length > 0) {
+            basePositions = [...basePositions, ...syntheticPositions]
+          }
+        }
+
+        setPositions(basePositions)
       } catch {
         setError('Failed to fetch positions')
       } finally {
@@ -281,6 +363,99 @@ export default function Positions() {
     return () => unsubscribe()
   }, [fetchPositions])
 
+  // Lookup maps for fast contract reconciliation access
+  const contractRecMap = useMemo(() => {
+    const map = new Map<string, ContractReconciliation>()
+    if (attributedData?.contracts) {
+      for (const c of attributedData.contracts) {
+        map.set(getContractKey(c.symbol, c.exchange, c.product), c)
+      }
+    }
+    return map
+  }, [attributedData])
+
+  const contractLegsMap = useMemo(() => {
+    const map = new Map<string, StrategyPositionItem[]>()
+    if (attributedData?.positions) {
+      for (const p of attributedData.positions) {
+        const key = getContractKey(p.symbol, p.exchange, p.product)
+        const list = map.get(key) || []
+        list.push(p)
+        map.set(key, list)
+      }
+    }
+    return map
+  }, [attributedData])
+
+  // Available strategies for filtering
+  const availableStrategies = useMemo(() => {
+    const set = new Set<string>()
+    if (attributedData?.positions) {
+      for (const p of attributedData.positions) {
+        if (p.strategy) {
+          set.add(p.strategy)
+        }
+      }
+    }
+    return Array.from(set).sort((a, b) => {
+      if (a === 'Manual / Unattributed') return 1
+      if (b === 'Manual / Unattributed') return -1
+      return a.localeCompare(b)
+    })
+  }, [attributedData])
+
+  // Strategy summary statistics
+  const strategyStats = useMemo(() => {
+    if (!attributedData?.positions) return []
+
+    const statsMap = new Map<
+      string,
+      {
+        name: string
+        count: number
+        totalPnl: number
+        unrealizedPnl: number
+        realizedPnl: number
+      }
+    >()
+
+    for (const pos of attributedData.positions) {
+      const sName = pos.strategy || 'Untagged'
+      let entry = statsMap.get(sName)
+      if (!entry) {
+        entry = { name: sName, count: 0, totalPnl: 0, unrealizedPnl: 0, realizedPnl: 0 }
+        statsMap.set(sName, entry)
+      }
+
+      // Read parent contract's live LTP
+      const parent = enhancedPositions.find(
+        (ep) =>
+          getContractKey(ep.symbol, ep.exchange, ep.product) ===
+          getContractKey(pos.symbol, pos.exchange, pos.product)
+      )
+      const ltp = parent?.ltp ?? pos.ltp
+
+      let unrealized = pos.unrealized_pnl
+      if (ltp !== undefined && ltp > 0 && Math.abs(pos.signed_quantity) > 1e-9) {
+        unrealized = pos.signed_quantity * (ltp - pos.average_price)
+      }
+      const total = pos.realized_pnl + unrealized
+
+      if (Math.abs(pos.signed_quantity) > 1e-9) {
+        entry.count += 1
+      }
+      entry.realizedPnl += pos.realized_pnl
+      entry.unrealizedPnl += unrealized
+      entry.totalPnl += total
+    }
+
+    return Array.from(statsMap.values()).sort((a, b) => {
+      if (a.name === 'Manual / Unattributed') return 1
+      if (b.name === 'Manual / Unattributed') return -1
+      return b.totalPnl - a.totalPnl
+    })
+  }, [attributedData, enhancedPositions])
+
   // Get group key for a position
   const getGroupKey = useCallback(
     (pos: Position): string => {
@@ -322,9 +497,18 @@ export default function Positions() {
 
       if (filters.exchange.length > 0 && !filters.exchange.includes(pos.exchange)) return false
 
+      if (selectedStrategy !== 'all') {
+        const key = getContractKey(pos.symbol, pos.exchange, pos.product)
+        const legs = contractLegsMap.get(key) || []
+        const hasStrategy = legs.some(
+          (l) => l.strategy.toLowerCase() === selectedStrategy.toLowerCase()
+        )
+        if (!hasStrategy) return false
+      }
+
       return true
     })
-  }, [enhancedPositions, filters])
+  }, [enhancedPositions, filters, selectedStrategy, contractLegsMap])
 
   // Sort positions
   const sortedPositions = useMemo(() => {
@@ -418,6 +602,7 @@ export default function Positions() {
 
   const clearFilters = () => {
     setFilters({ product: [], direction: [], exchange: [] })
+    setSelectedStrategy('all')
     setGrouping('none')
     setCollapsedGroups(new Set())
   }
@@ -434,10 +619,35 @@ export default function Positions() {
     })
   }
 
+  const toggleExpand = (contractKeyStr: string) => {
+    setExpandedContracts((prev) => {
+      const next = new Set(prev)
+      if (next.has(contractKeyStr)) {
+        next.delete(contractKeyStr)
+      } else {
+        next.add(contractKeyStr)
+      }
+      return next
+    })
+  }
+
+  const expandAll = () => {
+    const allKeys = new Set<string>()
+    filteredPositions.forEach((pos) => {
+      allKeys.add(getContractKey(pos.symbol, pos.exchange, pos.product))
+    })
+    setExpandedContracts(allKeys)
+  }
+
+  const collapseAll = () => {
+    setExpandedContracts(new Set())
+  }
+
   const hasActiveFilters =
     filters.product.length > 0 ||
     filters.direction.length > 0 ||
     filters.exchange.length > 0 ||
+    selectedStrategy !== 'all' ||
     grouping !== 'none'
 
   const handleClosePosition = async (position: Position) => {
@@ -626,6 +836,25 @@ export default function Positions() {
           <p className="text-muted-foreground">Monitor and manage your active trading positions</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Strategy Selector */}
+          {availableStrategies.length > 0 && (
+            <div className="w-[170px]">
+              <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+                <SelectTrigger size="sm" className="h-9 text-xs">
+                  <SelectValue placeholder="All Strategies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Strategies</SelectItem>
+                  {availableStrategies.map((strat) => (
+                    <SelectItem key={strat} value={strat}>
+                      {strat}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Settings Button */}
           <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
             <DialogTrigger asChild>
@@ -687,6 +916,42 @@ export default function Positions() {
                 </div>
 
                 <div className="border-t" />
+
+                {/* Strategy Filter in Settings */}
+                {availableStrategies.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Strategy Filter
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant={selectedStrategy === 'all' ? 'default' : 'outline'}
+                        size="sm"
+                        className={cn(
+                          'rounded-full text-xs',
+                          selectedStrategy === 'all' && 'bg-primary hover:bg-primary/90'
+                        )}
+                        onClick={() => setSelectedStrategy('all')}
+                      >
+                        All
+                      </Button>
+                      {availableStrategies.map((strat) => (
+                        <Button
+                          key={strat}
+                          variant={selectedStrategy === strat ? 'default' : 'outline'}
+                          size="sm"
+                          className={cn(
+                            'rounded-full text-xs',
+                            selectedStrategy === strat && 'bg-primary hover:bg-primary/90'
+                          )}
+                          onClick={() => setSelectedStrategy(strat)}
+                        >
+                          {strat}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Product Type */}
                 {!isCrypto && (
@@ -786,6 +1051,18 @@ export default function Positions() {
               Grouped: {grouping === 'underlying' ? 'Underlying' : 'Underlying & Expiry'}
             </Badge>
           )}
+          {selectedStrategy !== 'all' && (
+            <Badge
+              variant="secondary"
+              className="bg-primary/10 text-primary border-primary/30 flex items-center gap-1"
+            >
+              Strategy: {selectedStrategy}
+              <X
+                className="h-3 w-3 cursor-pointer hover:text-destructive"
+                onClick={() => setSelectedStrategy('all')}
+              />
+            </Badge>
+          )}
           {!isCrypto &&
             filters.product.map((v) => (
               <Badge
@@ -850,15 +1127,89 @@ export default function Positions() {
             <CardDescription>Total P&L</CardDescription>
             <CardTitle
               className={cn(
-                'text-2xl',
+                'text-2xl font-mono',
                 isProfit(stats.totalPnl) ? 'text-green-600' : 'text-red-600'
               )}
             >
+              {stats.totalPnl >= 0 ? '+' : ''}
               {formatCurrency(stats.totalPnl)}
             </CardTitle>
           </CardHeader>
         </Card>
       </div>
+
+      {/* Strategy Attribution Overview Cards */}
+      {strategyStats.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              Strategy Overview
+            </h3>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={expandAll}>
+                Expand All Contracts
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={collapseAll}>
+                Collapse All
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+            {strategyStats.map((s) => {
+              const isSelected = selectedStrategy.toLowerCase() === s.name.toLowerCase()
+              return (
+                <Card
+                  key={s.name}
+                  onClick={() =>
+                    setSelectedStrategy((prev) =>
+                      prev.toLowerCase() === s.name.toLowerCase() ? 'all' : s.name
+                    )
+                  }
+                  className={cn(
+                    'cursor-pointer transition-all hover:border-primary/50 hover:shadow-xs',
+                    isSelected && 'ring-2 ring-primary border-primary bg-primary/5'
+                  )}
+                >
+                  <CardHeader className="p-3 pb-1">
+                    <CardDescription
+                      className="text-xs font-semibold truncate text-foreground"
+                      title={s.name}
+                    >
+                      {s.name}
+                    </CardDescription>
+                    <CardTitle
+                      className={cn(
+                        'text-base font-bold font-mono',
+                        s.totalPnl >= 0 ? 'text-green-600' : 'text-red-600'
+                      )}
+                    >
+                      {s.totalPnl >= 0 ? '+' : ''}
+                      {formatCurrency(s.totalPnl)}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0 text-[11px] text-muted-foreground flex items-center justify-between">
+                    <span>
+                      {s.count} {s.count === 1 ? 'leg' : 'legs'}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'text-[10px] px-1 py-0',
+                        isSelected
+                          ? 'bg-primary text-primary-foreground border-transparent'
+                          : 'text-muted-foreground'
+                      )}
+                    >
+                      {isSelected ? 'Filtered' : 'Filter'}
+                    </Badge>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Positions Table */}
       <Card>
@@ -874,10 +1225,12 @@ export default function Positions() {
               icon={ChartCandlestick}
               title="No positions match your filters"
               description="Try adjusting or clearing your filters to see results."
-              action={hasActiveFilters ?
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  Clear Filters
-                </Button> : undefined
+              action={
+                hasActiveFilters ? (
+                  <Button variant="ghost" size="sm" onClick={clearFilters}>
+                    Clear Filters
+                  </Button>
+                ) : undefined
               }
             />
           ) : (
@@ -885,15 +1238,19 @@ export default function Positions() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <SortableHeader column={0} label="Symbol" className="w-[140px]" />
+                    <SortableHeader column={0} label="Symbol / Contract" className="w-[260px]" />
                     <TableHead className="w-[80px]">Exchange</TableHead>
                     {!isCrypto && <TableHead className="w-[80px]">Product</TableHead>}
-                    <SortableHeader column={3} label="Qty" className="w-[80px] text-right" />
-                    <SortableHeader column={4} label="Avg Price" className="w-[120px] text-right" />
-                    <TableHead className="w-[120px] text-right">LTP</TableHead>
+                    <SortableHeader
+                      column={3}
+                      label="Broker Net"
+                      className="w-[100px] text-right"
+                    />
+                    <SortableHeader column={4} label="Avg Price" className="w-[110px] text-right" />
+                    <TableHead className="w-[110px] text-right">LTP</TableHead>
                     <SortableHeader column={6} label="P&L" className="w-[120px] text-right" />
-                    <SortableHeader column={7} label="P&L %" className="w-[100px] text-right" />
-                    <TableHead className="w-[60px] text-right">Action</TableHead>
+                    <SortableHeader column={7} label="P&L %" className="w-[90px] text-right" />
+                    <TableHead className="w-[70px] text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -910,7 +1267,7 @@ export default function Positions() {
                             className="bg-muted/50 cursor-pointer hover:bg-muted"
                             onClick={() => toggleGroup(groupKey)}
                           >
-                            <TableCell colSpan={6}>
+                            <TableCell colSpan={isCrypto ? 5 : 6}>
                               <div className="flex items-center gap-3 py-1 font-semibold">
                                 {isCollapsed ? (
                                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -925,7 +1282,7 @@ export default function Positions() {
                             </TableCell>
                             <TableCell
                               className={cn(
-                                'text-right font-bold',
+                                'text-right font-bold font-mono',
                                 isProfit(groupStats.totalPnl) ? 'text-green-600' : 'text-red-600'
                               )}
                             >
@@ -934,7 +1291,7 @@ export default function Positions() {
                             </TableCell>
                             <TableCell
                               className={cn(
-                                'text-right font-semibold',
+                                'text-right font-semibold font-mono',
                                 isProfit(groupStats.pnlPercent) ? 'text-green-600' : 'text-red-600'
                               )}
                             >
@@ -963,89 +1320,338 @@ export default function Positions() {
                             const quantity = Number(position.quantity) || 0
                             const isOpen = quantity !== 0
 
+                            const cKey = getContractKey(
+                              position.symbol,
+                              position.exchange,
+                              position.product
+                            )
+                            const contractRec = contractRecMap.get(cKey)
+                            const allLegs = contractLegsMap.get(cKey) || []
+                            const legs =
+                              selectedStrategy !== 'all'
+                                ? allLegs.filter(
+                                    (l) =>
+                                      l.strategy.toLowerCase() === selectedStrategy.toLowerCase()
+                                  )
+                                : allLegs
+                            const isExpanded = expandedContracts.has(cKey)
+
                             return (
-                              <TableRow key={`${position.symbol}-${position.exchange}-${index}`}>
-                                <TableCell className="w-[140px] font-medium">
-                                  {position.symbol}
-                                </TableCell>
-                                <TableCell className="w-[80px]">
-                                  <Badge
-                                    variant="outline"
-                                    className={EXCHANGE_COLORS[position.exchange] || ''}
-                                  >
-                                    {position.exchange}
-                                  </Badge>
-                                </TableCell>
-                                {!isCrypto && (
+                              <React.Fragment
+                                key={`${position.symbol}-${position.exchange}-${position.product}-${index}`}
+                              >
+                                <TableRow className={cn(isExpanded && 'bg-muted/20')}>
+                                  {/* Symbol Cell with Expansion & Reconciliation info */}
+                                  <TableCell className="w-[260px]">
+                                    <div className="flex items-start gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 hover:bg-muted shrink-0 mt-0.5"
+                                        onClick={() => toggleExpand(cKey)}
+                                        aria-label={
+                                          isExpanded
+                                            ? `Collapse ${position.symbol}`
+                                            : `Expand ${position.symbol}`
+                                        }
+                                      >
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                        ) : (
+                                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                        )}
+                                      </Button>
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-semibold text-foreground">
+                                            {position.symbol}
+                                          </span>
+                                          {contractRec && (
+                                            <Badge
+                                              variant="outline"
+                                              className={cn(
+                                                'text-[10px] px-1.5 py-0 font-medium tracking-wide',
+                                                contractRec.reconciliation_status === 'RECONCILED'
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                                  : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30 font-bold'
+                                              )}
+                                            >
+                                              {contractRec.reconciliation_status === 'RECONCILED'
+                                                ? '✓ RECONCILED'
+                                                : '⚠ MISMATCH'}
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        {/* Reconciliation quantities strip */}
+                                        {contractRec && (
+                                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground font-mono">
+                                            <span>
+                                              Broker Net:{' '}
+                                              <strong className="text-foreground">
+                                                {contractRec.broker_quantity}
+                                              </strong>
+                                            </span>
+                                            <span>•</span>
+                                            <span>
+                                              Tracked:{' '}
+                                              <strong className="text-foreground">
+                                                {contractRec.tracked_quantity}
+                                              </strong>
+                                            </span>
+                                            {Math.abs(contractRec.residual_quantity) > 1e-6 && (
+                                              <>
+                                                <span>•</span>
+                                                <span className="text-amber-600 dark:text-amber-400">
+                                                  Manual:{' '}
+                                                  <strong>{contractRec.residual_quantity}</strong>
+                                                </span>
+                                              </>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </TableCell>
                                   <TableCell className="w-[80px]">
                                     <Badge
                                       variant="outline"
-                                      className={PRODUCT_COLORS[position.product] || ''}
+                                      className={EXCHANGE_COLORS[position.exchange] || ''}
                                     >
-                                      {position.product}
+                                      {position.exchange}
                                     </Badge>
                                   </TableCell>
-                                )}
-                                <TableCell
-                                  className={cn(
-                                    'w-[80px] text-right font-medium',
-                                    // A squared-off position is neither long nor
-                                    // short. Colouring its 0 red read as a short.
-                                    !isOpen
-                                      ? 'text-muted-foreground'
-                                      : quantity > 0
+                                  {!isCrypto && (
+                                    <TableCell className="w-[80px]">
+                                      <Badge
+                                        variant="outline"
+                                        className={PRODUCT_COLORS[position.product] || ''}
+                                      >
+                                        {position.product}
+                                      </Badge>
+                                    </TableCell>
+                                  )}
+                                  <TableCell
+                                    className={cn(
+                                      'w-[100px] text-right font-medium font-mono',
+                                      !isOpen
+                                        ? 'text-muted-foreground'
+                                        : quantity > 0
+                                          ? 'text-green-600'
+                                          : 'text-red-600'
+                                    )}
+                                  >
+                                    {position.quantity}
+                                  </TableCell>
+                                  <TableCell className="w-[110px] text-right font-mono">
+                                    {formatCurrency(position.average_price)}
+                                  </TableCell>
+                                  <TableCell className="w-[110px] text-right font-mono">
+                                    {position.ltp !== undefined
+                                      ? formatCurrency(position.ltp)
+                                      : '-'}
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      'w-[120px] text-right font-medium',
+                                      isProfit(position.pnl) ? 'text-green-600' : 'text-red-600'
+                                    )}
+                                  >
+                                    <div className="flex items-center justify-end gap-1 font-mono">
+                                      {isProfit(position.pnl) ? (
+                                        <TrendingUp className="h-4 w-4" />
+                                      ) : (
+                                        <TrendingDown className="h-4 w-4" />
+                                      )}
+                                      {formatCurrency(position.pnl)}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      'w-[90px] text-right font-mono',
+                                      isProfit(calculatePnlPercent(position))
                                         ? 'text-green-600'
                                         : 'text-red-600'
-                                  )}
-                                >
-                                  {position.quantity}
-                                </TableCell>
-                                <TableCell className="w-[120px] text-right font-mono">
-                                  {formatCurrency(position.average_price)}
-                                </TableCell>
-                                <TableCell className="w-[120px] text-right font-mono">
-                                  {position.ltp !== undefined ? formatCurrency(position.ltp) : '-'}
-                                </TableCell>
-                                <TableCell
-                                  className={cn(
-                                    'w-[120px] text-right font-medium',
-                                    isProfit(position.pnl) ? 'text-green-600' : 'text-red-600'
-                                  )}
-                                >
-                                  <div className="flex items-center justify-end gap-1">
-                                    {isProfit(position.pnl) ? (
-                                      <TrendingUp className="h-4 w-4" />
-                                    ) : (
-                                      <TrendingDown className="h-4 w-4" />
                                     )}
-                                    {formatCurrency(position.pnl)}
-                                  </div>
-                                </TableCell>
-                                <TableCell
-                                  className={cn(
-                                    'w-[100px] text-right',
-                                    isProfit(calculatePnlPercent(position))
-                                      ? 'text-green-600'
-                                      : 'text-red-600'
-                                  )}
-                                >
-                                  {calculatePnlPercent(position) >= 0 ? '+' : ''}
-                                  {calculatePnlPercent(position).toFixed(2)}%
-                                </TableCell>
-                                <TableCell className="w-[60px] text-right">
-                                  {isOpen && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                      onClick={() => handleClosePosition(position)}
-                                      aria-label={`Close ${position.symbol} position`}
+                                  >
+                                    {calculatePnlPercent(position) >= 0 ? '+' : ''}
+                                    {calculatePnlPercent(position).toFixed(2)}%
+                                  </TableCell>
+                                  <TableCell className="w-[70px] text-right">
+                                    {isOpen && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        onClick={() => handleClosePosition(position)}
+                                        aria-label={`Close ${position.symbol} position`}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+
+                                {/* Strategy Attribution Accordion Row */}
+                                {isExpanded && (
+                                  <TableRow className="bg-muted/10 hover:bg-muted/15 border-b border-border/50">
+                                    <TableCell
+                                      colSpan={isCrypto ? 8 : 9}
+                                      className="p-0 pl-10 pr-4 py-3"
                                     >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
+                                      <div className="rounded-md border border-border/60 bg-background/95 overflow-hidden shadow-xs">
+                                        <div className="bg-muted/40 px-3 py-1.5 border-b border-border/40 flex items-center justify-between">
+                                          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                                            Strategy Position Attribution
+                                          </span>
+                                          <span className="text-xs text-muted-foreground font-medium">
+                                            {legs.length} {legs.length === 1 ? 'record' : 'records'}
+                                          </span>
+                                        </div>
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow className="hover:bg-transparent border-b border-border/40 text-xs">
+                                              <TableHead className="py-2 h-8">Strategy</TableHead>
+                                              <TableHead className="py-2 h-8 text-right">
+                                                Qty
+                                              </TableHead>
+                                              <TableHead className="py-2 h-8 text-center">
+                                                Side
+                                              </TableHead>
+                                              <TableHead className="py-2 h-8 text-right">
+                                                Avg Price
+                                              </TableHead>
+                                              <TableHead className="py-2 h-8 text-right">
+                                                LTP
+                                              </TableHead>
+                                              <TableHead className="py-2 h-8 text-right">
+                                                P&L
+                                              </TableHead>
+                                              <TableHead className="py-2 h-8 text-right">
+                                                P&L %
+                                              </TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {legs.length === 0 ? (
+                                              <TableRow>
+                                                <TableCell
+                                                  colSpan={7}
+                                                  className="text-center py-4 text-xs text-muted-foreground"
+                                                >
+                                                  No strategy attribution records found for this
+                                                  contract.
+                                                </TableCell>
+                                              </TableRow>
+                                            ) : (
+                                              legs.map((leg, legIdx) => {
+                                                const liveLtp = position.ltp ?? leg.ltp
+                                                const sQty = leg.signed_quantity
+                                                const sAvg = leg.average_price
+                                                const sRealized = leg.realized_pnl
+
+                                                let sUnrealized = leg.unrealized_pnl
+                                                if (
+                                                  liveLtp !== undefined &&
+                                                  liveLtp > 0 &&
+                                                  Math.abs(sQty) > 1e-9
+                                                ) {
+                                                  sUnrealized = sQty * (liveLtp - sAvg)
+                                                }
+                                                const sTotal = sRealized + sUnrealized
+                                                const investment = Math.abs(sAvg * sQty)
+                                                const sPnlPercent =
+                                                  investment > 0 ? (sTotal / investment) * 100 : 0
+
+                                                const isManual =
+                                                  leg.strategy === 'Manual / Unattributed'
+
+                                                return (
+                                                  <TableRow
+                                                    key={`${leg.strategy}-${legIdx}`}
+                                                    className="text-xs hover:bg-muted/40"
+                                                  >
+                                                    <TableCell className="py-2 font-medium">
+                                                      {isManual ? (
+                                                        <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
+                                                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                                          Manual / Unattributed
+                                                        </span>
+                                                      ) : (
+                                                        <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                                                          <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                                                          {leg.strategy}
+                                                        </span>
+                                                      )}
+                                                    </TableCell>
+                                                    <TableCell
+                                                      className={cn(
+                                                        'py-2 text-right font-mono font-medium',
+                                                        sQty > 0
+                                                          ? 'text-green-600'
+                                                          : sQty < 0
+                                                            ? 'text-red-600'
+                                                            : 'text-muted-foreground'
+                                                      )}
+                                                    >
+                                                      {leg.signed_quantity}
+                                                    </TableCell>
+                                                    <TableCell className="py-2 text-center">
+                                                      <Badge
+                                                        variant="outline"
+                                                        className={cn(
+                                                          'text-[10px] px-1.5 py-0 font-semibold',
+                                                          leg.side === 'LONG'
+                                                            ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                                                            : leg.side === 'SHORT'
+                                                              ? 'bg-red-500/10 text-red-600 border-red-500/30'
+                                                              : 'bg-muted text-muted-foreground'
+                                                        )}
+                                                      >
+                                                        {leg.side}
+                                                      </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="py-2 text-right font-mono">
+                                                      {formatCurrency(leg.average_price)}
+                                                    </TableCell>
+                                                    <TableCell className="py-2 text-right font-mono">
+                                                      {liveLtp !== undefined
+                                                        ? formatCurrency(liveLtp)
+                                                        : '-'}
+                                                    </TableCell>
+                                                    <TableCell
+                                                      className={cn(
+                                                        'py-2 text-right font-mono font-medium',
+                                                        isProfit(sTotal)
+                                                          ? 'text-green-600'
+                                                          : 'text-red-600'
+                                                      )}
+                                                    >
+                                                      {sTotal >= 0 ? '+' : ''}
+                                                      {formatCurrency(sTotal)}
+                                                    </TableCell>
+                                                    <TableCell
+                                                      className={cn(
+                                                        'py-2 text-right font-mono',
+                                                        isProfit(sPnlPercent)
+                                                          ? 'text-green-600'
+                                                          : 'text-red-600'
+                                                      )}
+                                                    >
+                                                      {sPnlPercent >= 0 ? '+' : ''}
+                                                      {sPnlPercent.toFixed(2)}%
+                                                    </TableCell>
+                                                  </TableRow>
+                                                )
+                                              })
+                                            )}
+                                          </TableBody>
+                                        </Table>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </React.Fragment>
                             )
                           })}
                       </React.Fragment>
@@ -1054,12 +1660,15 @@ export default function Positions() {
                 </TableBody>
                 <TableFooter>
                   <TableRow className="bg-muted/50">
-                    <TableCell colSpan={6} className="text-right text-muted-foreground">
+                    <TableCell
+                      colSpan={isCrypto ? 5 : 6}
+                      className="text-right text-muted-foreground"
+                    >
                       Total P&L:
                     </TableCell>
                     <TableCell
                       className={cn(
-                        'w-[120px] text-right font-bold',
+                        'w-[120px] text-right font-bold font-mono',
                         isProfit(stats.totalPnl) ? 'text-green-600' : 'text-red-600'
                       )}
                     >

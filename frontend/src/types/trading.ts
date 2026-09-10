@@ -130,3 +130,56 @@ export interface ApiResponse<T> {
   message?: string
   data?: T
 }
+
+// -----------------------------------------------------------------------------
+// Strategy-attributed Positions & Broker Reconciliation
+// -----------------------------------------------------------------------------
+
+export interface StrategyPositionItem {
+  strategy: string
+  symbol: string
+  exchange: string
+  product: 'MIS' | 'NRML' | 'CNC' | string
+  signed_quantity: number
+  side: 'LONG' | 'SHORT' | 'FLAT'
+  quantity: number
+  average_price: number
+  ltp: number
+  realized_pnl: number
+  today_realized_pnl: number
+  unrealized_pnl: number
+  total_pnl: number
+  pnlpercent: number
+  broker_quantity: number
+  tracked_quantity: number
+  residual_quantity: number
+  reconciliation_status: string
+}
+
+export interface ContractReconciliation {
+  symbol: string
+  exchange: string
+  product: string
+  broker_quantity: number
+  tracked_quantity: number
+  residual_quantity: number
+  has_residual: boolean
+  strategies_count: number
+  reconciliation_status: string
+}
+
+export interface AttributedSummary {
+  total_broker_positions: number
+  total_tracked_positions: number
+  total_residual_positions: number
+  total_realized_pnl: number
+  total_unrealized_pnl: number
+  total_pnl: number
+  reconciliation_status: string
+}
+
+export interface AttributedPositionsData {
+  positions: StrategyPositionItem[]
+  contracts: ContractReconciliation[]
+  summary: AttributedSummary
+}

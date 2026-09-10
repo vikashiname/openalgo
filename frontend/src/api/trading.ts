@@ -1,5 +1,6 @@
 import type {
   ApiResponse,
+  AttributedPositionsData,
   GttOrder,
   Holding,
   MarginData,
@@ -152,6 +153,28 @@ export const tradingApi = {
     const response = await apiClient.post<ApiResponse<Position[]>>('/positionbook', {
       apikey: apiKey,
     })
+    return response.data
+  },
+
+  /**
+   * Get strategy-attributed positions and broker reconciliation
+   */
+  getAttributedPositions: async (
+    apiKey: string,
+    strategy?: string,
+    includeZeroResidual: boolean = true
+  ): Promise<ApiResponse<AttributedPositionsData>> => {
+    const payload: { apikey: string; strategy?: string; include_zero_residual?: boolean } = {
+      apikey: apiKey,
+      include_zero_residual: includeZeroResidual,
+    }
+    if (strategy) {
+      payload.strategy = strategy
+    }
+    const response = await apiClient.post<ApiResponse<AttributedPositionsData>>(
+      '/positions/attributed',
+      payload
+    )
     return response.data
   },
 

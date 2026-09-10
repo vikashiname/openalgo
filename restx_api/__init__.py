@@ -12,6 +12,7 @@ api = Api(
 
 # Import namespaces
 from .analyzer import api as analyzer_ns
+from .attributed_positions import api as attributed_positions_ns
 from .basket_order import api as basket_order_ns
 from .cancel_all_order import api as cancel_all_order_ns
 from .cancel_gtt_order import api as cancel_gtt_order_ns
@@ -109,3 +110,4 @@ api.add_namespace(modify_gtt_order_ns, path="/modifygttorder")
 api.add_namespace(cancel_gtt_order_ns, path="/cancelgttorder")
 api.add_namespace(gtt_orderbook_ns, path="/gttorderbook")
 api.add_namespace(strategy_ns, path="/strategy")
+api.add_namespace(attributed_positions_ns, path="/positions/attributed")
