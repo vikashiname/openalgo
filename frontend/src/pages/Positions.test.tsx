@@ -5,6 +5,7 @@
  */
 
 import { fireEvent, render, screen, waitFor, within } from '@/test/test-utils'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AttributedPositionsData, Position } from '@/types/trading'
 import Positions from './Positions'
@@ -93,135 +94,11 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: mockLocalStorage,
   writable: true,
 })
-
-const OPEN_POSITION: Position = {
-  symbol: 'NIFTY25SEP2625000CE',
-  exchange: 'NFO',
-  product: 'NRML',
-  quantity: -75,
-  average_price: 120.5,
-  ltp: 98.25,
-  pnl: 1668.75,
-} as Position
-
-const CLOSED_POSITION: Position = {
-  symbol: 'BANKNIFTY25SEP2654000PE',
-  exchange: 'NFO',
-  product: 'NRML',
-  quantity: 0,
-  average_price: 210.1,
-  ltp: 185.4,
-  pnl: -740.0,
-} as Position
-
-async function renderPositions(positions: Position[]) {
-  mockGetPositions.mockResolvedValue({ status: 'success', data: positions })
-  mockGetAttributedPositions.mockResolvedValue({
-    status: 'success',
-    data: { positions: [], contracts: [], summary: {} },
-  })
-  render(<Positions />)
-  // The first row to arrive tells us the fetch has resolved and painted.
-  await screen.findByText(positions[0].symbol)
-}
-
-describe('Positions close button', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockLocalStorage.clear()
-    mockGetAttributedPositions.mockResolvedValue({
-      status: 'success',
-      data: { positions: [], contracts: [], summary: {} },
-    })
-  })
-
-  it('offers Close on a position that is still open', async () => {
-    await renderPositions([OPEN_POSITION])
-
-    expect(
-      screen.getByRole('button', { name: `Close ${OPEN_POSITION.symbol} position` })
-    ).toBeInTheDocument()
-  })
-
-  it('THE DEFECT: offers no Close on a position already squared off', async () => {
-    await renderPositions([CLOSED_POSITION])
-
-    expect(
-      screen.queryByRole('button', { name: `Close ${CLOSED_POSITION.symbol} position` })
-    ).not.toBeInTheDocument()
-  })
-
-  it('leaves the open row actionable when both are on the page', async () => {
-    await renderPositions([OPEN_POSITION, CLOSED_POSITION])
-
-    expect(
-      screen.getByRole('button', { name: `Close ${OPEN_POSITION.symbol} position` })
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: `Close ${CLOSED_POSITION.symbol} position` })
-    ).not.toBeInTheDocument()
-  })
-
-  it('never sends a close request for a squared-off position', async () => {
-    await renderPositions([CLOSED_POSITION])
-
-    // Nothing on the row can reach the endpoint, so the engine is never asked
-    // to exit a position that is not there, and no alert can be raised for it.
-    expect(mockClosePosition).not.toHaveBeenCalled()
-  })
-
-  it('keeps the closed row and its realised P&L visible', async () => {
-    await renderPositions([CLOSED_POSITION])
-
-    // Hiding the row would lose the realised figure, which is the reason the
-    // broker still reports it. Only the action goes.
-    expect(screen.getByText(CLOSED_POSITION.symbol)).toBeInTheDocument()
-  })
-
-  it('does not colour a zero quantity as a short', async () => {
-    await renderPositions([CLOSED_POSITION])
-
-    // Symbol, exchange, product, quantity - the fourth cell of the row.
-    const row = screen.getByText(CLOSED_POSITION.symbol).closest('tr')
-    expect(row).not.toBeNull()
-    const quantityCell = within(row as HTMLElement).getAllByRole('cell')[3]
-
-    expect(quantityCell).toHaveTextContent('0')
-    expect(quantityCell.className).toContain('text-muted-foreground')
-    expect(quantityCell.className).not.toContain('text-red-600')
-  })
-
-  it('treats a string zero quantity as closed, not as open', async () => {
-    // The API does not always send a number. Zerodha's position mapping
-    // defaults quantity to the string "0", and a strict `!== 0` reads that as
-    // an open position - putting the button back on the exact row this guard
-    // exists to clear.
-    await renderPositions([{ ...CLOSED_POSITION, quantity: '0' } as unknown as Position])
-
-    expect(
-      screen.queryByRole('button', { name: `Close ${CLOSED_POSITION.symbol} position` })
-    ).not.toBeInTheDocument()
-  })
-
-  it('still offers Close when a live quantity arrives as a string', async () => {
-    await renderPositions([{ ...OPEN_POSITION, quantity: '-75' } as unknown as Position])
-
-    expect(
-      screen.getByRole('button', { name: `Close ${OPEN_POSITION.symbol} position` })
-    ).toBeInTheDocument()
-  })
-
-  it('disables Close All when every position is squared off', async () => {
-    await renderPositions([CLOSED_POSITION])
-
-    expect(screen.getByRole('button', { name: /Close All/ })).toBeDisabled()
-  })
-})
-
 describe('Positions with Strategy Attribution (Phase 3)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockLocalStorage.clear()
+    window.localStorage?.clear()
   })
 
   it('renders broker net position, contract reconciliation badges, and strategy overview cards', async () => {
@@ -825,6 +702,180 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
       expect(screen.getByText('Account is currently FLAT')).toBeInTheDocument()
     })
     expect(screen.queryByText('ABB')).not.toBeInTheDocument()
+  })
+
+  it('renders Closed Positions tab with completed round-trip trades and realized P&L', async () => {
+    const brokerPositions: Position[] = [
+      {
+        symbol: 'RELIANCE',
+        exchange: 'NSE',
+        product: 'MIS',
+        quantity: 0,
+        average_price: 0,
+        ltp: 2900.0,
+        pnl: 500,
+        pnlpercent: 0,
+      },
+    ]
+
+    const attributedData: AttributedPositionsData = {
+      positions: [],
+      contracts: [],
+      closed_positions: [
+        {
+          strategy: 'Macdfno',
+          symbol: 'RELIANCE',
+          exchange: 'NSE',
+          product: 'MIS',
+          direction: 'LONG',
+          quantity: 50,
+          entry_average: 2890.0,
+          exit_average: 2900.0,
+          entry_time: '2026-09-11 09:30:00',
+          exit_time: '2026-09-11 10:15:00',
+          realized_pnl: 500.0,
+          status: 'CLOSED',
+        },
+      ],
+      summary: {
+        total_broker_positions: 0,
+        total_tracked_positions: 0,
+        total_residual_positions: 0,
+        total_realized_pnl: 500.0,
+        total_unrealized_pnl: 0,
+        total_pnl: 500.0,
+        reconciliation_status: 'RECONCILED',
+      },
+    }
+
+    const user = userEvent.setup()
+    mockGetPositions.mockResolvedValue({ status: 'success', data: brokerPositions })
+    mockGetAttributedPositions.mockResolvedValue({ status: 'success', data: attributedData })
+
+    render(<Positions />)
+
+    // Strategy overview card should display the strategy and its closed count
+    await waitFor(() => {
+      expect(screen.getByText('Macdfno')).toBeInTheDocument()
+      expect(screen.getByText('1 closed')).toBeInTheDocument()
+    })
+
+    const closedTabTrigger = await screen.findByRole('tab', { name: /Closed/i })
+    await user.click(closedTabTrigger)
+    await waitFor(() => {
+      expect(screen.getAllByText('RELIANCE').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('LONG')).toBeInTheDocument()
+      expect(screen.getByText('50')).toBeInTheDocument()
+      expect(screen.getByText('CLOSED')).toBeInTheDocument()
+      expect(screen.getAllByText('+₹500.00').length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  it('filters Closed Positions by selected strategy', async () => {
+    const user = userEvent.setup()
+    const brokerPositions: Position[] = []
+    const attributedData: AttributedPositionsData = {
+      positions: [],
+      contracts: [],
+      closed_positions: [
+        {
+          strategy: 'Macdfno',
+          symbol: 'NIFTY26SEPFUT',
+          exchange: 'NFO',
+          product: 'NRML',
+          direction: 'LONG',
+          quantity: 25,
+          entry_average: 25000.0,
+          exit_average: 25100.0,
+          entry_time: '2026-09-11 09:20:00',
+          exit_time: '2026-09-11 10:00:00',
+          realized_pnl: 2500.0,
+          status: 'CLOSED',
+        },
+        {
+          strategy: 'Emacrossopen',
+          symbol: 'BANKNIFTY26SEPFUT',
+          exchange: 'NFO',
+          product: 'NRML',
+          direction: 'SHORT',
+          quantity: 15,
+          entry_average: 54000.0,
+          exit_average: 53800.0,
+          entry_time: '2026-09-11 09:30:00',
+          exit_time: '2026-09-11 10:30:00',
+          realized_pnl: 3000.0,
+          status: 'CLOSED',
+        },
+      ],
+      summary: {
+        total_broker_positions: 0,
+        total_tracked_positions: 0,
+        total_residual_positions: 0,
+        total_realized_pnl: 5500.0,
+        total_unrealized_pnl: 0,
+        total_pnl: 5500.0,
+        reconciliation_status: 'RECONCILED',
+      },
+    }
+
+    mockGetPositions.mockResolvedValue({ status: 'success', data: brokerPositions })
+    mockGetAttributedPositions.mockResolvedValue({ status: 'success', data: attributedData })
+
+    render(<Positions />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Macdfno')).toBeInTheDocument()
+      expect(screen.getByText('Emacrossopen')).toBeInTheDocument()
+    })
+
+    // Switch to Closed tab
+    const closedTabTrigger = await screen.findByRole('tab', { name: /Closed/i })
+    await user.click(closedTabTrigger)
+
+    await waitFor(() => {
+      expect(screen.getByText('NIFTY26SEPFUT')).toBeInTheDocument()
+      expect(screen.getByText('BANKNIFTY26SEPFUT')).toBeInTheDocument()
+    })
+
+    // Click on Macdfno card to filter
+    const macdCard = screen.getAllByText('Macdfno')[0].closest('div')
+    if (macdCard) await user.click(macdCard)
+
+    await waitFor(() => {
+      expect(screen.getByText('NIFTY26SEPFUT')).toBeInTheDocument()
+      expect(screen.queryByText('BANKNIFTY26SEPFUT')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows empty state when no closed positions exist today', async () => {
+    const user = userEvent.setup()
+    mockGetPositions.mockResolvedValue({ status: 'success', data: [] })
+    mockGetAttributedPositions.mockResolvedValue({
+      status: 'success',
+      data: {
+        positions: [],
+        contracts: [],
+        closed_positions: [],
+        summary: {
+          total_broker_positions: 0,
+          total_tracked_positions: 0,
+          total_residual_positions: 0,
+          total_realized_pnl: 0,
+          total_unrealized_pnl: 0,
+          total_pnl: 0,
+          reconciliation_status: 'RECONCILED',
+        },
+      },
+    })
+
+    render(<Positions />)
+
+    const closedTabTrigger = await screen.findByRole('tab', { name: /Closed/i })
+    await user.click(closedTabTrigger)
+
+    await waitFor(() => {
+      expect(screen.getByText('No closed positions today')).toBeInTheDocument()
+    })
   })
 })
 

@@ -31,11 +31,158 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _resolve_trade_strategy(trade: Dict[str, Any]) -> str:
+    """Resolve strategy attribution for a trade record."""
+    strat = trade.get("strategy")
+    if strat and str(strat).strip():
+        return str(strat).strip()
+
+    orderid = trade.get("orderid") or trade.get("order_id")
+    if orderid:
+        try:
+            from database.strategy_book_db import get_order_tag
+
+            tag = get_order_tag(str(orderid))
+            if tag and tag.strategy and str(tag.strategy).strip():
+                return str(tag.strategy).strip()
+        except Exception:
+            pass
+
+    return "Manual / Unattributed"
+
+
+def derive_closed_positions(
+    trades: List[Dict[str, Any]],
+    strategy_filter: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Derives completed/closed trades from executed fills.
+    Matches opposite fills per (strategy, symbol, exchange, product) chronologically (FIFO).
+    Only returns genuine completed trades with reliable realized P&L.
+    Zero-quantity contracts with no fills are never included.
+    Day-scoped to the current trading session date (tradebook is session-scoped).
+    """
+    if not trades or not isinstance(trades, list):
+        return []
+
+    norm_filter = (
+        str(strategy_filter).strip().lower()
+        if strategy_filter and str(strategy_filter).strip().lower() != "all"
+        else None
+    )
+
+    # Group trades by (strategy, symbol, exchange, product)
+    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
+
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+
+        sym = str(t.get("symbol") or "").strip().upper()
+        exch = str(t.get("exchange") or "").strip().upper()
+        prod = str(t.get("product") or "").strip().upper()
+        if not sym:
+            continue
+
+        strat = _resolve_trade_strategy(t)
+        if norm_filter and strat.lower() != norm_filter:
+            continue
+
+        key = (strat, sym, exch, prod)
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(t)
+
+    def _extract_timestamp(item: Dict[str, Any]) -> str:
+        return str(
+            item.get("timestamp")
+            or item.get("trade_timestamp")
+            or item.get("trade_time")
+            or item.get("tradeTime")
+            or item.get("order_timestamp")
+            or item.get("order_time")
+            or item.get("time")
+            or ""
+        )
+
+    closed_trades: List[Dict[str, Any]] = []
+
+    for (strat, sym, exch, prod), fill_list in grouped.items():
+        # Sort chronologically by timestamp
+        fill_list.sort(key=_extract_timestamp)
+
+        open_lots: List[Dict[str, Any]] = []
+
+        for fill in fill_list:
+            action = str(fill.get("action") or fill.get("side") or "").strip().upper()
+            qty = abs(_f(fill.get("quantity") or fill.get("tradedQty") or fill.get("traded_quantity") or 0))
+            price = _f(fill.get("average_price") or fill.get("price") or fill.get("tradePrice") or 0)
+            timestamp = _extract_timestamp(fill)
+
+            if qty <= 1e-9:
+                continue
+
+            if not open_lots or open_lots[0]["action"] == action:
+                open_lots.append({
+                    "action": action,
+                    "quantity": qty,
+                    "price": price,
+                    "timestamp": timestamp,
+                })
+            else:
+                # Opposite action -> closing fills
+                rem_qty = qty
+                while rem_qty > 1e-9 and open_lots:
+                    lot = open_lots[0]
+                    matched = min(rem_qty, lot["quantity"])
+                    direction = "LONG" if lot["action"] == "BUY" else "SHORT"
+                    entry_avg = lot["price"]
+                    exit_avg = price
+                    entry_time = lot["timestamp"]
+                    exit_time = timestamp
+                    pnl_sign = 1.0 if direction == "LONG" else -1.0
+                    realized = round(matched * (exit_avg - entry_avg) * pnl_sign, 2)
+
+                    closed_trades.append({
+                        "strategy": strat,
+                        "symbol": sym,
+                        "exchange": exch,
+                        "product": prod,
+                        "direction": direction,
+                        "quantity": round(matched, 4),
+                        "entry_average": round(entry_avg, 2),
+                        "exit_average": round(exit_avg, 2),
+                        "entry_time": entry_time,
+                        "exit_time": exit_time,
+                        "realized_pnl": realized,
+                        "status": "CLOSED",
+                    })
+
+                    lot["quantity"] -= matched
+                    rem_qty -= matched
+                    if lot["quantity"] <= 1e-9:
+                        open_lots.pop(0)
+
+                if rem_qty > 1e-9:
+                    open_lots.append({
+                        "action": action,
+                        "quantity": rem_qty,
+                        "price": price,
+                        "timestamp": timestamp,
+                    })
+
+    # Sort closed trades newest exit first
+    closed_trades.sort(key=lambda x: str(x.get("exit_time") or ""), reverse=True)
+    return closed_trades
+
+
 def reconcile_positions(
     broker_positions: List[Dict[str, Any]],
     strategy_legs: List[Dict[str, Any]],
     strategy_filter: Optional[str] = None,
     include_zero_residual: bool = False,
+    closed_positions: Optional[List[Dict[str, Any]]] = None,
+    trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Pure reconciliation engine combining broker positions and strategy legs.
@@ -48,10 +195,11 @@ def reconcile_positions(
         strategy_legs: Leg records from database/strategy_book_db.
         strategy_filter: Optional strategy name to filter strategy-level positions.
         include_zero_residual: Whether to output 'Manual / Unattributed' when residual is 0.
-
-    Returns:
-        Structured dictionary with positions, contracts, and summary.
+        closed_positions: Pre-derived closed positions (optional).
+        trades: Trade list to derive closed positions if closed_positions is not provided.
     """
+    if closed_positions is None and trades is not None:
+        closed_positions = derive_closed_positions(trades, strategy_filter)
     # 1. Index broker positions by (symbol, exchange, product)
     broker_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     for p in broker_positions or []:
@@ -250,6 +398,7 @@ def reconcile_positions(
     return {
         "positions": attributed_positions,
         "contracts": contract_summaries,
+        "closed_positions": closed_positions if closed_positions is not None else [],
         "summary": {
             "total_broker_positions": total_broker_count,
             "total_tracked_positions": total_tracked_count,
@@ -268,10 +417,11 @@ def get_attributed_positions(
     include_zero_residual: bool = False,
     broker_positions_override: Optional[List[Dict[str, Any]]] = None,
     strategy_legs_override: Optional[List[Dict[str, Any]]] = None,
+    tradebook_override: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[bool, Dict[str, Any], int]:
     """
-    Fetches authoritative broker positions and strategy legs, returning
-    the reconciled strategy-attributed position book.
+    Fetches authoritative broker positions, strategy legs, and tradebook, returning
+    the reconciled strategy-attributed position book including day-scoped closed positions.
 
     Args:
         api_key: OpenAlgo API key.
@@ -279,6 +429,7 @@ def get_attributed_positions(
         include_zero_residual: Whether to output 'Manual / Unattributed' when residual is 0.
         broker_positions_override: Injected broker positions (for unit tests).
         strategy_legs_override: Injected strategy legs (for unit tests).
+        tradebook_override: Injected trades list (for unit tests).
 
     Returns:
         Tuple of (success, response_dict, http_status_code).
@@ -348,12 +499,30 @@ def get_attributed_positions(
             logger.exception(f"Error fetching strategy legs: {e}")
             strategy_legs = []
 
-    # 3. Perform reconciliation
+    # 3. Fetch tradebook for day-scoped closed positions
+    if tradebook_override is not None:
+        raw_trades = tradebook_override
+    else:
+        try:
+            from services.tradebook_service import get_tradebook
+            tb_success, tb_resp, _ = get_tradebook(api_key=api_key)
+            raw_trades = tb_resp.get("data") if tb_success and isinstance(tb_resp, dict) else []
+        except Exception as e:
+            logger.warning(f"Error fetching tradebook for closed positions: {e}")
+            raw_trades = []
+
+    closed_positions = derive_closed_positions(
+        trades=raw_trades or [],
+        strategy_filter=strategy,
+    )
+
+    # 4. Perform reconciliation
     result = reconcile_positions(
         broker_positions=broker_positions,
         strategy_legs=strategy_legs,
         strategy_filter=strategy,
         include_zero_residual=include_zero_residual,
+        closed_positions=closed_positions,
     )
 
     return True, {"status": "success", "data": result}, 200

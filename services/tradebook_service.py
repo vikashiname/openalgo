@@ -157,6 +157,20 @@ def get_tradebook(
     """
     # Case 1: API-based authentication
     if api_key and not (auth_token and broker):
+        try:
+            from database.settings_db import get_analyze_mode
+            is_analyze = get_analyze_mode()
+        except Exception:
+            is_analyze = False
+
+        if is_analyze:
+            from database.auth_db import verify_api_key
+            user_id = verify_api_key(api_key)
+            if not user_id:
+                return False, {"status": "error", "message": "Invalid openalgo apikey"}, 403
+            original_data = {"apikey": api_key}
+            return get_tradebook_with_auth(None, None, original_data)
+
         AUTH_TOKEN, broker_name = get_auth_token_broker(api_key)
         if AUTH_TOKEN is None:
             return False, {"status": "error", "message": "Invalid openalgo apikey"}, 403

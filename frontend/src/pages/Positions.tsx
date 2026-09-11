@@ -66,8 +66,10 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import type {
   AttributedPositionsData,
+  ClosedPosition,
   ContractReconciliation,
   Position,
   StrategyPositionItem,
@@ -170,6 +172,7 @@ export default function Positions() {
   const [attributedData, setAttributedData] = useState<AttributedPositionsData | null>(null)
   const [expandedContracts, setExpandedContracts] = useState<Set<string>>(new Set())
   const [selectedStrategy, setSelectedStrategy] = useState<string>('all')
+  const [positionsTab, setPositionsTab] = useState<'active' | 'closed'>('active')
 
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -262,7 +265,9 @@ export default function Positions() {
         } else if (posResp.status === 'fulfilled') {
           setError(posResp.value.message || 'Failed to fetch positions')
         } else {
-          setError('Failed to fetch positions')
+          const reason = (posResp as PromiseRejectedResult).reason
+          const msg = reason?.response?.data?.message || reason?.message
+          setError(msg || 'Failed to fetch positions')
         }
 
         if (
@@ -288,10 +293,10 @@ export default function Positions() {
           )
 
           const syntheticPositions: Position[] = []
-          for (const contract of attrData.contracts) {
+          for (const contract of attrData.contracts || []) {
             const key = getContractKey(contract.symbol, contract.exchange, contract.product)
             if (!existingKeys.has(key)) {
-              const legs = attrData.positions.filter(
+              const legs = (attrData.positions || []).filter(
                 (p) => getContractKey(p.symbol, p.exchange, p.product) === key
               )
               const sampleLeg = legs[0]
@@ -340,8 +345,9 @@ export default function Positions() {
           basePositions = basePositions.filter((p) => (p.quantity || 0) !== 0)
           setPositions(basePositions)
         }
-      } catch {
-        setError('Failed to fetch positions')
+      } catch (err: unknown) {
+        const msg = (err as { message?: string })?.message
+        setError(msg || 'Failed to fetch positions')
       } finally {
         setIsLoading(false)
         setIsRefreshing(false)
@@ -428,6 +434,13 @@ export default function Positions() {
         }
       }
     }
+    if (attributedData?.closed_positions) {
+      for (const cp of attributedData.closed_positions) {
+        if (cp.strategy) {
+          set.add(cp.strategy)
+        }
+      }
+    }
     return Array.from(set).sort((a, b) => {
       if (a === 'Manual / Unattributed') return 1
       if (b === 'Manual / Unattributed') return -1
@@ -437,24 +450,25 @@ export default function Positions() {
 
   // Strategy summary statistics
   const strategyStats = useMemo(() => {
-    if (!attributedData?.positions) return []
+    if (!attributedData?.positions && !attributedData?.closed_positions) return []
 
     const statsMap = new Map<
       string,
       {
         name: string
         count: number
+        closedCount: number
         totalPnl: number
         unrealizedPnl: number
         realizedPnl: number
       }
     >()
 
-    for (const pos of attributedData.positions) {
+    for (const pos of attributedData?.positions || []) {
       const sName = pos.strategy || 'Untagged'
       let entry = statsMap.get(sName)
       if (!entry) {
-        entry = { name: sName, count: 0, totalPnl: 0, unrealizedPnl: 0, realizedPnl: 0 }
+        entry = { name: sName, count: 0, closedCount: 0, totalPnl: 0, unrealizedPnl: 0, realizedPnl: 0 }
         statsMap.set(sName, entry)
       }
 
@@ -480,12 +494,47 @@ export default function Positions() {
       entry.totalPnl += total
     }
 
+    if (attributedData?.closed_positions) {
+      for (const cp of attributedData.closed_positions) {
+        const sName = cp.strategy || 'Untagged'
+        let entry = statsMap.get(sName)
+        if (!entry) {
+          entry = {
+            name: sName,
+            count: 0,
+            closedCount: 1,
+            totalPnl: cp.realized_pnl,
+            unrealizedPnl: 0,
+            realizedPnl: cp.realized_pnl,
+          }
+          statsMap.set(sName, entry)
+        } else {
+          entry.closedCount += 1
+          entry.realizedPnl += cp.realized_pnl
+          entry.totalPnl += cp.realized_pnl
+        }
+      }
+    }
+
     return Array.from(statsMap.values()).sort((a, b) => {
       if (a.name === 'Manual / Unattributed') return 1
       if (b.name === 'Manual / Unattributed') return -1
       return b.totalPnl - a.totalPnl
     })
   }, [attributedData, enhancedPositions])
+
+  // Filtered closed positions based on selectedStrategy
+  const filteredClosedPositions: ClosedPosition[] = useMemo(() => {
+    const list = attributedData?.closed_positions || []
+    if (selectedStrategy === 'all') return list
+    return list.filter(
+      (p) => (p.strategy || '').toLowerCase() === selectedStrategy.toLowerCase()
+    )
+  }, [attributedData, selectedStrategy])
+
+  const totalClosedPnl = useMemo(() => {
+    return filteredClosedPositions.reduce((sum, p) => sum + (p.realized_pnl || 0), 0)
+  }, [filteredClosedPositions])
 
   // Get group key for a position
   const getGroupKey = useCallback(
@@ -732,6 +781,58 @@ export default function Positions() {
   }
 
   const exportToCSV = () => {
+    if (positionsTab === 'closed') {
+      if (filteredClosedPositions.length === 0) {
+        showToast.error('No data to export', 'system')
+        return
+      }
+
+      try {
+        const headers = [
+          'Strategy',
+          'Symbol',
+          'Exchange',
+          'Product',
+          'Direction',
+          'Quantity',
+          'Entry Avg',
+          'Exit Avg',
+          'Entry Time',
+          'Exit Time',
+          'Realized P&L',
+          'Status',
+        ]
+        const rows = filteredClosedPositions.map((p) => [
+          sanitizeCSV(p.strategy),
+          sanitizeCSV(p.symbol),
+          sanitizeCSV(p.exchange),
+          sanitizeCSV(p.product),
+          sanitizeCSV(p.direction),
+          sanitizeCSV(p.quantity),
+          sanitizeCSV(p.entry_average),
+          sanitizeCSV(p.exit_average),
+          sanitizeCSV(p.entry_time),
+          sanitizeCSV(p.exit_time),
+          sanitizeCSV(p.realized_pnl),
+          sanitizeCSV(p.status),
+        ])
+
+        const csv = [headers, ...rows].map((row) => row.join(',')).join('\n')
+        const blob = new Blob([csv], { type: 'text/csv' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        const filename = `closed_positions_${new Date().toISOString().split('T')[0]}.csv`
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(url)
+        showToast.success(`Downloaded ${filename}`, 'clipboard')
+      } catch {
+        showToast.error('Failed to export CSV', 'system')
+      }
+      return
+    }
+
     if (filteredPositions.length === 0) {
       showToast.error('No data to export', 'system')
       return
@@ -1210,11 +1311,16 @@ export default function Positions() {
               return (
                 <Card
                   key={s.name}
-                  onClick={() =>
-                    setSelectedStrategy((prev) =>
-                      prev.toLowerCase() === s.name.toLowerCase() ? 'all' : s.name
-                    )
-                  }
+                  onClick={() => {
+                    if (selectedStrategy.toLowerCase() === s.name.toLowerCase()) {
+                      setSelectedStrategy('all')
+                    } else {
+                      setSelectedStrategy(s.name)
+                      if (s.count === 0 && (s.closedCount ?? 0) > 0) {
+                        setPositionsTab('closed')
+                      }
+                    }
+                  }}
                   className={cn(
                     'cursor-pointer transition-all hover:border-primary/50 hover:shadow-xs',
                     isSelected && 'ring-2 ring-primary border-primary bg-primary/5'
@@ -1239,7 +1345,13 @@ export default function Positions() {
                   </CardHeader>
                   <CardContent className="p-3 pt-0 text-[11px] text-muted-foreground flex items-center justify-between">
                     <span>
-                      {s.count} {s.count === 1 ? 'leg' : 'legs'}
+                      {s.count > 0 && (s.closedCount ?? 0) > 0
+                        ? `${s.count} open · ${s.closedCount} closed`
+                        : s.count > 0
+                        ? `${s.count} ${s.count === 1 ? 'leg' : 'legs'}`
+                        : (s.closedCount ?? 0) > 0
+                        ? `${s.closedCount} closed`
+                        : '0 positions'}
                     </span>
                     <Badge
                       variant="outline"
@@ -1260,9 +1372,32 @@ export default function Positions() {
         </div>
       )}
 
-      {/* Positions Table */}
-      <Card>
-        <CardContent className="py-0">
+      {/* Positions Tabs & Tables */}
+      <Tabs
+        value={positionsTab}
+        onValueChange={(val) => setPositionsTab(val as 'active' | 'closed')}
+        className="space-y-3"
+      >
+        <div className="flex items-center justify-between">
+          <TabsList className="grid grid-cols-2 w-[280px]">
+            <TabsTrigger value="active" className="gap-2">
+              <span>Active</span>
+              <Badge variant="secondary" className="text-[11px] px-1.5 py-0">
+                {filteredPositions.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger value="closed" className="gap-2">
+              <span>Closed</span>
+              <Badge variant="secondary" className="text-[11px] px-1.5 py-0">
+                {filteredClosedPositions.length}
+              </Badge>
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="active" className="mt-0">
+          <Card>
+            <CardContent className="py-0">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin" />
@@ -1736,6 +1871,161 @@ export default function Positions() {
           )}
         </CardContent>
       </Card>
+    </TabsContent>
+
+    <TabsContent value="closed" className="mt-0">
+      <Card>
+        <CardContent className="py-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : error ? (
+            <div className="text-center py-12 text-muted-foreground">{error}</div>
+          ) : filteredClosedPositions.length === 0 ? (
+            <EmptyState
+              icon={ChartCandlestick}
+              title={
+                selectedStrategy !== 'all'
+                  ? `No closed positions for ${selectedStrategy}`
+                  : 'No closed positions today'
+              }
+              description={
+                selectedStrategy !== 'all'
+                  ? 'Completed round-trip trades for this strategy will appear here.'
+                  : 'Completed round-trip trades from today’s session will appear here.'
+              }
+              action={
+                selectedStrategy !== 'all' ? (
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedStrategy('all')}>
+                    Show All Strategies
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[140px]">Strategy</TableHead>
+                    <TableHead className="w-[200px]">Symbol / Contract</TableHead>
+                    <TableHead className="w-[80px]">Exchange</TableHead>
+                    {!isCrypto && <TableHead className="w-[80px]">Product</TableHead>}
+                    <TableHead className="w-[90px]">Direction</TableHead>
+                    <TableHead className="w-[90px] text-right">Quantity</TableHead>
+                    <TableHead className="w-[100px] text-right">Entry Avg</TableHead>
+                    <TableHead className="w-[100px] text-right">Exit Avg</TableHead>
+                    <TableHead className="w-[140px] text-center">Entry Time</TableHead>
+                    <TableHead className="w-[140px] text-center">Exit Time</TableHead>
+                    <TableHead className="w-[120px] text-right">Realized P&L</TableHead>
+                    <TableHead className="w-[80px] text-center">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredClosedPositions.map((pos, idx) => {
+                    const isWin = pos.realized_pnl >= 0
+                    return (
+                      <TableRow key={`${pos.strategy}-${pos.symbol}-${pos.exit_time}-${idx}`}>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className="font-semibold text-xs text-primary border-primary/30 bg-primary/5"
+                          >
+                            {pos.strategy}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-semibold font-mono">
+                          {pos.symbol}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="text-xs">
+                            {pos.exchange}
+                          </Badge>
+                        </TableCell>
+                        {!isCrypto && (
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {pos.product}
+                            </Badge>
+                          </TableCell>
+                        )}
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'text-xs font-semibold',
+                              pos.direction === 'LONG'
+                                ? 'border-green-500/30 text-green-600 bg-green-500/10'
+                                : 'border-red-500/30 text-red-600 bg-red-500/10'
+                            )}
+                          >
+                            {pos.direction}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-medium">
+                          {pos.quantity}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {formatCurrency(pos.entry_average)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {formatCurrency(pos.exit_average)}
+                        </TableCell>
+                        <TableCell className="text-center text-xs text-muted-foreground font-mono">
+                          {pos.entry_time || '—'}
+                        </TableCell>
+                        <TableCell className="text-center text-xs text-muted-foreground font-mono">
+                          {pos.exit_time || '—'}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            'text-right font-mono font-bold',
+                            isWin ? 'text-green-600' : 'text-red-600'
+                          )}
+                        >
+                          {pos.realized_pnl >= 0 ? '+' : ''}
+                          {formatCurrency(pos.realized_pnl)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] text-muted-foreground bg-muted/40"
+                          >
+                            CLOSED
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+                <TableFooter>
+                  <TableRow className="bg-muted/50">
+                    <TableCell
+                      colSpan={isCrypto ? 9 : 10}
+                      className="text-right text-muted-foreground font-medium"
+                    >
+                      Total Realized P&L:
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        'text-right font-bold font-mono',
+                        totalClosedPnl >= 0 ? 'text-green-600' : 'text-red-600'
+                      )}
+                    >
+                      {totalClosedPnl >= 0 ? '+' : ''}
+                      {formatCurrency(totalClosedPnl)}
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </TabsContent>
+  </Tabs>
     </div>
   )
 }

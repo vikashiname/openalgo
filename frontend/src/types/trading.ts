@@ -178,8 +178,25 @@ export interface AttributedSummary {
   reconciliation_status: string
 }
 
+export interface ClosedPosition {
+  strategy: string
+  symbol: string
+  exchange: string
+  product: string
+  direction: 'LONG' | 'SHORT'
+  quantity: number
+  entry_average: number
+  exit_average: number
+  entry_time: string
+  exit_time: string
+  realized_pnl: number
+  status: 'CLOSED'
+}
+
 export interface AttributedPositionsData {
   positions: StrategyPositionItem[]
   contracts: ContractReconciliation[]
+  closed_positions?: ClosedPosition[]
   summary: AttributedSummary
 }
+

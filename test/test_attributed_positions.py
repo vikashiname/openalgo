@@ -18,7 +18,11 @@ For every test, asserts:
 """
 
 import pytest
-from services.attributed_positions_service import reconcile_positions, get_attributed_positions
+from services.attributed_positions_service import (
+    reconcile_positions,
+    get_attributed_positions,
+    derive_closed_positions,
+)
 
 
 def _sum_quantities(contract_summary: dict, positions: list) -> tuple:
@@ -808,4 +812,177 @@ def test_zero_quantity_stale_positions_filtered_out():
     assert all(s == "TATASTEEL" for s in pos_symbols)
     assert "ABB" not in pos_symbols
     assert "ADANIGREEN" not in pos_symbols
+
+
+def test_derive_closed_positions_long_trade():
+    """Test derive_closed_positions for a completed LONG trade (BUY then SELL)."""
+    trades = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 50,
+            "price": 2890.0,
+            "trade_time": "2026-09-11 09:30:00",
+            "strategy": "Macdfno",
+        },
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 50,
+            "price": 2900.0,
+            "trade_time": "2026-09-11 10:15:00",
+            "strategy": "Macdfno",
+        },
+    ]
+
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    cp = closed[0]
+    assert cp["strategy"] == "Macdfno"
+    assert cp["symbol"] == "RELIANCE"
+    assert cp["exchange"] == "NSE"
+    assert cp["product"] == "MIS"
+    assert cp["direction"] == "LONG"
+    assert cp["quantity"] == 50.0
+    assert cp["entry_average"] == 2890.0
+    assert cp["exit_average"] == 2900.0
+    assert cp["realized_pnl"] == 500.0  # (2900 - 2890) * 50
+    assert cp["entry_time"] == "2026-09-11 09:30:00"
+    assert cp["exit_time"] == "2026-09-11 10:15:00"
+    assert cp["status"] == "CLOSED"
+
+
+def test_derive_closed_positions_short_trade():
+    """Test derive_closed_positions for a completed SHORT trade (SELL then BUY)."""
+    trades = [
+        {
+            "symbol": "NIFTY26SEPFUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 25,
+            "price": 25100.0,
+            "trade_time": "2026-09-11 09:20:00",
+            "strategy": "Emacrossopen",
+        },
+        {
+            "symbol": "NIFTY26SEPFUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 25,
+            "price": 25000.0,
+            "trade_time": "2026-09-11 09:50:00",
+            "strategy": "Emacrossopen",
+        },
+    ]
+
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    cp = closed[0]
+    assert cp["strategy"] == "Emacrossopen"
+    assert cp["symbol"] == "NIFTY26SEPFUT"
+    assert cp["direction"] == "SHORT"
+    assert cp["quantity"] == 25.0
+    assert cp["entry_average"] == 25100.0
+    assert cp["exit_average"] == 25000.0
+    assert cp["realized_pnl"] == 2500.0  # (25100 - 25000) * 25
+    assert cp["status"] == "CLOSED"
+
+
+def test_derive_closed_positions_partial_fill_and_strategy_filter():
+    """Test partial closes and filtering by strategy."""
+    trades = [
+        # Strategy A: buy 100, sell 60 -> 60 closed
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "CNC",
+            "action": "BUY",
+            "quantity": 100,
+            "price": 1500.0,
+            "trade_time": "2026-09-11 09:15:00",
+            "strategy": "StrategyA",
+        },
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "CNC",
+            "action": "SELL",
+            "quantity": 60,
+            "price": 1520.0,
+            "trade_time": "2026-09-11 10:00:00",
+            "strategy": "StrategyA",
+        },
+        # Strategy B: sell 50, buy 50 -> 50 closed
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "CNC",
+            "action": "SELL",
+            "quantity": 50,
+            "price": 1530.0,
+            "trade_time": "2026-09-11 10:30:00",
+            "strategy": "StrategyB",
+        },
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "CNC",
+            "action": "BUY",
+            "quantity": 50,
+            "price": 1510.0,
+            "trade_time": "2026-09-11 11:00:00",
+            "strategy": "StrategyB",
+        },
+    ]
+
+    all_closed = derive_closed_positions(trades)
+    assert len(all_closed) == 2
+
+    # Filter for StrategyA only
+    strat_a_closed = derive_closed_positions(trades, strategy_filter="StrategyA")
+    assert len(strat_a_closed) == 1
+    assert strat_a_closed[0]["strategy"] == "StrategyA"
+    assert strat_a_closed[0]["quantity"] == 60.0
+    assert strat_a_closed[0]["realized_pnl"] == 1200.0  # (1520 - 1500) * 60
+
+    # Filter for StrategyB only
+    strat_b_closed = derive_closed_positions(trades, strategy_filter="StrategyB")
+    assert len(strat_b_closed) == 1
+    assert strat_b_closed[0]["strategy"] == "StrategyB"
+    assert strat_b_closed[0]["quantity"] == 50.0
+    assert strat_b_closed[0]["realized_pnl"] == 1000.0  # (1530 - 1510) * 50
+
+
+def test_zero_broker_contract_without_trades_is_not_closed():
+    """A zero-quantity broker position alone must NOT produce a closed position."""
+    broker_positions = [
+        {
+            "symbol": "ABB",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 4500.0,
+        }
+    ]
+    # Reconcile with no trades
+    result = reconcile_positions(broker_positions, strategy_legs=[], trades=[])
+    assert result["closed_positions"] == []
+    assert result["positions"] == []
+    assert result["contracts"] == []
+
+
+def test_daily_reset_with_no_trades_returns_empty_closed():
+    """At morning session rollover (03:00 IST), when today's tradebook has no trades, closed_positions is empty."""
+    result = reconcile_positions(broker_positions=[], strategy_legs=[], trades=[])
+    assert result["closed_positions"] == []
+    assert result["positions"] == []
+    assert result["contracts"] == []
+
 
