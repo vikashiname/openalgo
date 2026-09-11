@@ -877,5 +877,126 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
       expect(screen.getByText('No closed positions today')).toBeInTheDocument()
     })
   })
+
+  it('cleanly dismisses loading spinner when Active=0 and Closed=0, displaying FLAT empty state', async () => {
+    mockGetPositions.mockResolvedValue({ status: 'success', data: [] })
+    mockGetAttributedPositions.mockResolvedValue({
+      status: 'success',
+      data: {
+        positions: [],
+        contracts: [],
+        closed_positions: [],
+        summary: {
+          total_broker_positions: 0,
+          total_tracked_positions: 0,
+          total_residual_positions: 0,
+          total_realized_pnl: 0,
+          total_unrealized_pnl: 0,
+          total_pnl: 0,
+          reconciliation_status: 'RECONCILED',
+        },
+      },
+    })
+
+    render(<Positions />)
+
+    // Wait for loading spinner to disappear and empty state to render
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByText('No active positions')).toBeInTheDocument()
+      expect(screen.getByText('Account is currently FLAT')).toBeInTheDocument()
+    })
+
+    // Badges should show 0 for both active and closed
+    const activeTrigger = screen.getByRole('tab', { name: /Active/i })
+    const closedTrigger = screen.getByRole('tab', { name: /Closed/i })
+    expect(activeTrigger).toHaveTextContent('0')
+    expect(closedTrigger).toHaveTextContent('0')
+  })
+
+  it('cleanly dismisses loading spinner when Active=0 and Closed>0, displaying closed trades on Closed tab', async () => {
+    const user = userEvent.setup()
+    mockGetPositions.mockResolvedValue({ status: 'success', data: [] })
+    mockGetAttributedPositions.mockResolvedValue({
+      status: 'success',
+      data: {
+        positions: [],
+        contracts: [],
+        closed_positions: [
+          {
+            strategy: 'Macdfno',
+            symbol: 'NIFTY26SEPFUT',
+            exchange: 'NFO',
+            product: 'NRML',
+            direction: 'LONG',
+            quantity: 25,
+            entry_average: 25000.0,
+            exit_average: 25100.0,
+            entry_time: '2026-09-11 09:20:00',
+            exit_time: '2026-09-11 10:00:00',
+            realized_pnl: 2500.0,
+            status: 'CLOSED',
+          },
+        ],
+        summary: {
+          total_broker_positions: 0,
+          total_tracked_positions: 0,
+          total_residual_positions: 0,
+          total_realized_pnl: 2500.0,
+          total_unrealized_pnl: 0,
+          total_pnl: 2500.0,
+          reconciliation_status: 'RECONCILED',
+        },
+      },
+    })
+
+    render(<Positions />)
+
+    // Strategy overview card should display the strategy
+    await waitFor(() => {
+      expect(screen.getByText('Macdfno')).toBeInTheDocument()
+      expect(screen.getByText('1 closed')).toBeInTheDocument()
+    })
+
+    const closedTabTrigger = await screen.findByRole('tab', { name: /Closed/i })
+    await user.click(closedTabTrigger)
+
+    await waitFor(() => {
+      expect(screen.getByText('NIFTY26SEPFUT')).toBeInTheDocument()
+      expect(screen.getAllByText('Macdfno').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('+₹2,500.00').length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  it('handles getPositions failure gracefully when getAttributedPositions succeeds', async () => {
+    // getPositions fails (e.g. timeout or expired broker token)
+    mockGetPositions.mockRejectedValue(new Error('Broker auth expired'))
+    mockGetAttributedPositions.mockResolvedValue({
+      status: 'success',
+      data: {
+        positions: [],
+        contracts: [],
+        closed_positions: [],
+        summary: {
+          total_broker_positions: 0,
+          total_tracked_positions: 0,
+          total_residual_positions: 0,
+          total_realized_pnl: 0,
+          total_unrealized_pnl: 0,
+          total_pnl: 0,
+          reconciliation_status: 'RECONCILED',
+        },
+      },
+    })
+
+    render(<Positions />)
+
+    // Loading should resolve cleanly without displaying error
+    await waitFor(() => {
+      expect(screen.getByText('No active positions')).toBeInTheDocument()
+      expect(screen.getByText('Account is currently FLAT')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Broker auth expired')).not.toBeInTheDocument()
+  })
 })
 

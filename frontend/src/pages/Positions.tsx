@@ -164,6 +164,15 @@ const PRODUCT_COLORS: Record<string, string> = {
   NRML: 'bg-slate-500/20 text-slate-600 border-slate-500/30',
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallbackMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(fallbackMsg)), ms)
+    ),
+  ])
+}
+
 export default function Positions() {
   const { apiKey, user } = useAuthStore()
   const { isCrypto } = useSupportedExchanges()
@@ -178,6 +187,7 @@ export default function Positions() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showStaleWarning, setShowStaleWarning] = useState(false)
+  const isFetchingRef = useRef<boolean>(false)
 
   // Page visibility tracking for resource optimization
   const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
@@ -246,28 +256,40 @@ export default function Positions() {
         return
       }
 
+      if (isFetchingRef.current && !showRefresh) {
+        return
+      }
+      isFetchingRef.current = true
+
       if (showRefresh) setIsRefreshing(true)
 
       try {
         const [posResp, attrResp] = await Promise.allSettled([
-          tradingApi.getPositions(apiKey),
-          tradingApi.getAttributedPositions(apiKey, undefined, true),
+          withTimeout(tradingApi.getPositions(apiKey), 10000, 'Position book request timed out'),
+          withTimeout(
+            tradingApi.getAttributedPositions(apiKey, undefined, true),
+            10000,
+            'Attributed positions request timed out'
+          ),
         ])
 
         let basePositions: Position[] = []
+        let hasValidPosData = false
+        let posError: string | null = null
+
         if (
           posResp.status === 'fulfilled' &&
           posResp.value.status === 'success' &&
-          posResp.value.data
+          Array.isArray(posResp.value.data)
         ) {
           basePositions = posResp.value.data
-          setError(null)
+          hasValidPosData = true
         } else if (posResp.status === 'fulfilled') {
-          setError(posResp.value.message || 'Failed to fetch positions')
+          posError = posResp.value.message || 'Failed to fetch positions'
         } else {
           const reason = (posResp as PromiseRejectedResult).reason
-          const msg = reason?.response?.data?.message || reason?.message
-          setError(msg || 'Failed to fetch positions')
+          posError =
+            reason?.response?.data?.message || reason?.message || 'Failed to fetch positions'
         }
 
         if (
@@ -277,6 +299,7 @@ export default function Positions() {
         ) {
           const attrData = attrResp.value.data
           setAttributedData(attrData)
+          setError(null)
 
           // Build local map of reconciliation data from attrData
           const recMap = new Map<string, ContractReconciliation>()
@@ -340,10 +363,21 @@ export default function Positions() {
           })
 
           setPositions(basePositions)
-        } else {
-          // Attribution data not available: filter base positions by non-zero broker quantity
+        } else if (hasValidPosData) {
+          // Attribution data not available, but base positions succeeded:
+          // Filter base positions by non-zero broker quantity
           basePositions = basePositions.filter((p) => (p.quantity || 0) !== 0)
           setPositions(basePositions)
+          setError(null)
+        } else {
+          // Both failed
+          const attrReason =
+            attrResp.status === 'rejected' ? (attrResp as PromiseRejectedResult).reason : null
+          const attrMsg =
+            attrReason?.response?.data?.message ||
+            attrReason?.message ||
+            (attrResp.status === 'fulfilled' ? attrResp.value?.message : null)
+          setError(attrMsg || posError || 'Failed to fetch positions')
         }
       } catch (err: unknown) {
         const msg = (err as { message?: string })?.message
@@ -351,10 +385,20 @@ export default function Positions() {
       } finally {
         setIsLoading(false)
         setIsRefreshing(false)
+        isFetchingRef.current = false
       }
     },
     [apiKey]
   )
+
+  // Safety fallback: ensure isLoading cannot remain true indefinitely (max 12 seconds)
+  useEffect(() => {
+    if (!isLoading) return
+    const timer = setTimeout(() => {
+      setIsLoading(false)
+    }, 12000)
+    return () => clearTimeout(timer)
+  }, [isLoading])
 
   // Initial fetch and visibility-aware polling
   // Pauses polling when tab is hidden to save resources

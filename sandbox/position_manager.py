@@ -773,27 +773,15 @@ class PositionManager:
             quote_cache = self._fetch_quotes_from_websocket(symbols_list)
             ws_count = len(quote_cache)
 
-            # Find symbols that need fallback to multiquotes
+            # Do not block on external broker REST multiquotes in sandbox/analyze mode;
+            # symbols without fresh WebSocket ticks retain their last known LTP/PnL from DB
             missing_symbols = [
                 s for s in symbols_list if s not in quote_cache or quote_cache[s] is None
             ]
-
             if missing_symbols:
-                # Fallback to multiquotes for missing symbols (no individual quote fallback to avoid rate limiting)
                 logger.debug(
-                    f"Positions MTM: {ws_count} from WebSocket, {len(missing_symbols)} need multiquotes fallback"
+                    f"Positions MTM: {ws_count} from WebSocket, {len(missing_symbols)} waiting for WebSocket data"
                 )
-                multiquotes_cache = self._fetch_quotes_batch(missing_symbols)
-                quote_cache.update(multiquotes_cache)
-
-                # Log any symbols that couldn't be fetched (don't fall back to individual quotes)
-                still_missing = [
-                    s for s in missing_symbols if s not in quote_cache or quote_cache[s] is None
-                ]
-                if still_missing:
-                    logger.debug(
-                        f"{len(still_missing)} symbols not available via multiquotes, waiting for WebSocket data"
-                    )
             else:
                 logger.debug(f"Positions MTM: All {ws_count} symbols from WebSocket (no API calls)")
 
