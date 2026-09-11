@@ -101,6 +101,12 @@ def reconcile_positions(
         # Residual quantity: difference between broker net and tracked strategies
         residual_qty = round(b_qty - tracked_qty, 4)
 
+        # Skip contracts that have no activity (broker == 0, tracked == 0, residual == 0, and no active strategy legs)
+        if abs(b_qty) <= 1e-9 and abs(tracked_qty) <= 1e-9 and abs(residual_qty) <= 1e-9:
+            has_active_legs = any(abs(_f(l.get("quantity"))) > 1e-9 for l in all_contract_legs)
+            if not has_active_legs:
+                continue
+
         # Mathematical guarantee check
         is_exact = abs((tracked_qty + residual_qty) - b_qty) < 1e-6
         reconciliation_status = "RECONCILED" if is_exact else "DISCREPANCY"
@@ -284,22 +290,48 @@ def get_attributed_positions(
     if broker_positions_override is not None:
         broker_positions = broker_positions_override
     else:
-        # Validate API key
-        auth_token, broker_name = get_auth_token_broker(api_key)
-        if auth_token is None:
-            return False, {"status": "error", "message": "Invalid openalgo apikey"}, 403
+        try:
+            from database.settings_db import get_analyze_mode
+            is_analyze = get_analyze_mode()
+        except Exception:
+            is_analyze = False
 
-        success, resp, status_code = get_positionbook(api_key=api_key)
-        if not success:
-            return (
-                False,
-                {
-                    "status": "error",
-                    "message": f"Failed to fetch broker position book: {resp.get('message', 'Unknown error')}",
-                },
-                status_code,
-            )
-        broker_positions = resp.get("data") or []
+        if is_analyze:
+            user_id = verify_api_key(api_key)
+            if not user_id:
+                return False, {"status": "error", "message": "Invalid openalgo apikey"}, 403
+
+            from services.sandbox_service import sandbox_get_positions
+
+            success, resp, status_code = sandbox_get_positions(api_key, {"apikey": api_key})
+            if not success:
+                return (
+                    False,
+                    {
+                        "status": "error",
+                        "message": f"Failed to fetch sandbox position book: {resp.get('message', 'Unknown error')}",
+                    },
+                    status_code,
+                )
+            broker_positions = resp.get("data") or []
+        else:
+            # Validate API key
+            auth_token, broker_name = get_auth_token_broker(api_key)
+            if auth_token is None:
+                return False, {"status": "error", "message": "Invalid openalgo apikey"}, 403
+
+            success, resp, status_code = get_positionbook(api_key=api_key)
+            if not success:
+                return (
+                    False,
+                    {
+                        "status": "error",
+                        "message": f"Failed to fetch broker position book: {resp.get('message', 'Unknown error')}",
+                    },
+                    status_code,
+                )
+            broker_positions = resp.get("data") or []
+
         if not isinstance(broker_positions, list):
             broker_positions = []
 

@@ -748,3 +748,64 @@ def test_service_with_mocked_broker_and_db(monkeypatch):
     assert len(resp["data"]["positions"]) == 1
     assert resp["data"]["positions"][0]["strategy"] == "MY_STRAT"
     assert resp["data"]["positions"][0]["reconciliation_status"] == "RECONCILED"
+
+
+def test_zero_quantity_stale_positions_filtered_out():
+    """Stale/closed contracts with broker=0, tracked=0, residual=0 must be skipped."""
+    broker_positions = [
+        # Active position: broker != 0
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": -2750.0,
+            "average_price": 140.0,
+            "ltp": 139.0,
+        },
+        # Stale zero positions: broker == 0, no legs
+        {
+            "symbol": "ABB",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 4500.0,
+        },
+        {
+            "symbol": "ADANIGREEN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 1200.0,
+        },
+    ]
+    strategy_legs = [
+        {
+            "strategy": "MOMENTUM",
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": -2750.0,
+            "average_price": 140.0,
+            "realized_pnl": 0.0,
+            "today_realized_pnl": 0.0,
+        }
+    ]
+
+    # Even with include_zero_residual=True, stale zero positions must NOT appear
+    result = reconcile_positions(broker_positions, strategy_legs, include_zero_residual=True)
+    contracts = result["contracts"]
+    positions = result["positions"]
+
+    # Only TATASTEEL should be present
+    symbols = [c["symbol"] for c in contracts]
+    assert symbols == ["TATASTEEL"]
+    assert "ABB" not in symbols
+    assert "ADANIGREEN" not in symbols
+
+    pos_symbols = [p["symbol"] for p in positions]
+    assert all(s == "TATASTEEL" for s in pos_symbols)
+    assert "ABB" not in pos_symbols
+    assert "ADANIGREEN" not in pos_symbols
+

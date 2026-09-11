@@ -690,4 +690,141 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
       expect(mockClosePosition).toHaveBeenCalledWith('SBIN', 'NSE', 'MIS')
     })
   })
+
+  it('hides stale zero-quantity rows (broker=0, tracked=0, residual=0) while keeping active ones', async () => {
+    const brokerPositions: Position[] = [
+      {
+        symbol: 'TATASTEEL',
+        exchange: 'NSE',
+        product: 'MIS',
+        quantity: -2750,
+        average_price: 140.0,
+        ltp: 139.0,
+        pnl: 2750.0,
+        pnlpercent: 0.71,
+      },
+      {
+        symbol: 'ABB',
+        exchange: 'NSE',
+        product: 'MIS',
+        quantity: 0,
+        average_price: 0,
+        ltp: 4500.0,
+        pnl: 0,
+        pnlpercent: 0,
+      },
+      {
+        symbol: 'ADANIGREEN',
+        exchange: 'NSE',
+        product: 'MIS',
+        quantity: 0,
+        average_price: 0,
+        ltp: 1200.0,
+        pnl: 0,
+        pnlpercent: 0,
+      },
+    ]
+
+    const attributedData: AttributedPositionsData = {
+      positions: [
+        {
+          strategy: 'MOMENTUM',
+          symbol: 'TATASTEEL',
+          exchange: 'NSE',
+          product: 'MIS',
+          signed_quantity: -2750,
+          side: 'SHORT',
+          quantity: 2750,
+          average_price: 140.0,
+          ltp: 139.0,
+          realized_pnl: 0,
+          today_realized_pnl: 0,
+          unrealized_pnl: 2750.0,
+          total_pnl: 2750.0,
+          pnlpercent: 0.71,
+          broker_quantity: -2750,
+          tracked_quantity: -2750,
+          residual_quantity: 0,
+          reconciliation_status: 'RECONCILED',
+        },
+      ],
+      contracts: [
+        {
+          symbol: 'TATASTEEL',
+          exchange: 'NSE',
+          product: 'MIS',
+          broker_quantity: -2750,
+          tracked_quantity: -2750,
+          residual_quantity: 0,
+          has_residual: false,
+          strategies_count: 1,
+          reconciliation_status: 'RECONCILED',
+        },
+      ],
+      summary: {
+        total_broker_positions: 1,
+        total_tracked_positions: 1,
+        total_residual_positions: 0,
+        total_realized_pnl: 0,
+        total_unrealized_pnl: 2750.0,
+        total_pnl: 2750.0,
+        reconciliation_status: 'RECONCILED',
+      },
+    }
+
+    mockGetPositions.mockResolvedValue({ status: 'success', data: brokerPositions })
+    mockGetAttributedPositions.mockResolvedValue({ status: 'success', data: attributedData })
+
+    render(<Positions />)
+
+    // Active position must be visible
+    await waitFor(() => {
+      expect(screen.getByText('TATASTEEL')).toBeInTheDocument()
+    })
+
+    // Stale zero-quantity positions must NOT appear
+    expect(screen.queryByText('ABB')).not.toBeInTheDocument()
+    expect(screen.queryByText('ADANIGREEN')).not.toBeInTheDocument()
+  })
+
+  it('displays "No active positions" and "Account is currently FLAT" when all positions are zero', async () => {
+    const brokerPositions: Position[] = [
+      {
+        symbol: 'ABB',
+        exchange: 'NSE',
+        product: 'MIS',
+        quantity: 0,
+        average_price: 0,
+        ltp: 4500.0,
+        pnl: 0,
+        pnlpercent: 0,
+      },
+    ]
+
+    const attributedData: AttributedPositionsData = {
+      positions: [],
+      contracts: [],
+      summary: {
+        total_broker_positions: 0,
+        total_tracked_positions: 0,
+        total_residual_positions: 0,
+        total_realized_pnl: 0,
+        total_unrealized_pnl: 0,
+        total_pnl: 0,
+        reconciliation_status: 'RECONCILED',
+      },
+    }
+
+    mockGetPositions.mockResolvedValue({ status: 'success', data: brokerPositions })
+    mockGetAttributedPositions.mockResolvedValue({ status: 'success', data: attributedData })
+
+    render(<Positions />)
+
+    await waitFor(() => {
+      expect(screen.getByText('No active positions')).toBeInTheDocument()
+      expect(screen.getByText('Account is currently FLAT')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('ABB')).not.toBeInTheDocument()
+  })
 })
+

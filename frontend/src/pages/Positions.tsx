@@ -273,6 +273,12 @@ export default function Positions() {
           const attrData = attrResp.value.data
           setAttributedData(attrData)
 
+          // Build local map of reconciliation data from attrData
+          const recMap = new Map<string, ContractReconciliation>()
+          for (const c of attrData.contracts || []) {
+            recMap.set(getContractKey(c.symbol, c.exchange, c.product), c)
+          }
+
           // Handle Edge Case 1: Strategy opposite positions or contracts present in attribution
           // where broker_quantity === 0 (or not returned by broker in positionbook).
           // If a contract exists in attribution but not in basePositions, inject a synthetic position
@@ -306,9 +312,34 @@ export default function Positions() {
           if (syntheticPositions.length > 0) {
             basePositions = [...basePositions, ...syntheticPositions]
           }
-        }
 
-        setPositions(basePositions)
+          // Filter out stale zero-quantity entries:
+          // A position should be considered ACTIVE only when:
+          // broker_quantity != 0 || tracked_quantity != 0 || abs(residual_quantity) > 1e-9
+          // (or if it has active strategy legs)
+          basePositions = basePositions.filter((p) => {
+            const key = getContractKey(p.symbol, p.exchange, p.product)
+            const rec = recMap.get(key)
+            if (rec) {
+              const isZero =
+                rec.broker_quantity === 0 &&
+                rec.tracked_quantity === 0 &&
+                Math.abs(rec.residual_quantity) <= 1e-9
+              if (isZero && (rec.strategies_count ?? 0) === 0) {
+                return false
+              }
+              return true
+            }
+            // If not found in reconciliation contracts, active only if broker quantity != 0
+            return (p.quantity || 0) !== 0
+          })
+
+          setPositions(basePositions)
+        } else {
+          // Attribution data not available: filter base positions by non-zero broker quantity
+          basePositions = basePositions.filter((p) => (p.quantity || 0) !== 0)
+          setPositions(basePositions)
+        }
       } catch {
         setError('Failed to fetch positions')
       } finally {
@@ -483,6 +514,24 @@ export default function Positions() {
   // Filter positions (use enhancedPositions for real-time LTP/PnL)
   const filteredPositions = useMemo(() => {
     return enhancedPositions.filter((pos) => {
+      // Stale / Zero position cleanup:
+      // An OpenAlgo position is considered ACTIVE only when:
+      // broker_quantity != 0 || tracked_quantity != 0 || abs(residual_quantity) > 1e-9
+      // If broker == 0 AND tracked == 0 AND residual == 0 (and no active strategy legs), hide it.
+      const cKey = getContractKey(pos.symbol, pos.exchange, pos.product)
+      const rec = contractRecMap.get(cKey)
+      if (rec) {
+        const isZero =
+          rec.broker_quantity === 0 &&
+          rec.tracked_quantity === 0 &&
+          Math.abs(rec.residual_quantity) <= 1e-9
+        if (isZero && (rec.strategies_count ?? 0) === 0) {
+          return false
+        }
+      } else if ((pos.quantity || 0) === 0) {
+        return false
+      }
+
       if (filters.product.length > 0 && !filters.product.includes(pos.product)) return false
 
       const qty = pos.quantity || 0
@@ -508,7 +557,7 @@ export default function Positions() {
 
       return true
     })
-  }, [enhancedPositions, filters, selectedStrategy, contractLegsMap])
+  }, [enhancedPositions, filters, selectedStrategy, contractRecMap, contractLegsMap])
 
   // Sort positions
   const sortedPositions = useMemo(() => {
@@ -1223,8 +1272,12 @@ export default function Positions() {
           ) : filteredPositions.length === 0 ? (
             <EmptyState
               icon={ChartCandlestick}
-              title="No positions match your filters"
-              description="Try adjusting or clearing your filters to see results."
+              title={hasActiveFilters ? 'No positions match your filters' : 'No active positions'}
+              description={
+                hasActiveFilters
+                  ? 'Try adjusting or clearing your filters to see results.'
+                  : 'Account is currently FLAT'
+              }
               action={
                 hasActiveFilters ? (
                   <Button variant="ghost" size="sm" onClick={clearFilters}>
