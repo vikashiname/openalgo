@@ -635,7 +635,12 @@ def get_attributed_positions(
         except Exception as e:
             logger.warning(f"Error fetching tradebook for closed positions: {e}")
             raw_trades = []
-        session_start = "2026-09-11 15:00:00"
+        try:
+            from services.strategy_module.session import session_started_at
+
+            session_start = session_started_at().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            session_start = None
 
     closed_positions = derive_closed_positions(
         trades=raw_trades or [],
