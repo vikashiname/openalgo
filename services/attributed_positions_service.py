@@ -20,6 +20,7 @@ from database.auth_db import get_auth_token_broker, verify_api_key
 from database.strategy_book_db import StrategyBookUnavailable, get_strategy_legs
 from services.positionbook_service import get_positionbook
 from utils.logging import get_logger
+from utils.strategy_attribution import normalize_strategy_name
 
 logger = get_logger(__name__)
 
@@ -33,9 +34,13 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 def _resolve_trade_strategy(trade: Dict[str, Any]) -> str:
     """Resolve strategy attribution for a trade record."""
+    from utils.strategy_attribution import normalize_strategy_name
+
     strat = trade.get("strategy")
     if strat and str(strat).strip():
-        return str(strat).strip()
+        norm = normalize_strategy_name(str(strat).strip())
+        if norm:
+            return norm
 
     orderid = trade.get("orderid") or trade.get("order_id")
     if orderid:
@@ -44,20 +49,60 @@ def _resolve_trade_strategy(trade: Dict[str, Any]) -> str:
 
             tag = get_order_tag(str(orderid))
             if tag and tag.strategy and str(tag.strategy).strip():
-                return str(tag.strategy).strip()
+                norm = normalize_strategy_name(str(tag.strategy).strip())
+                if norm:
+                    return norm
         except Exception:
             pass
 
     return "Manual / Unattributed"
 
 
+def _extract_exit_reason(fill: Dict[str, Any]) -> str:
+    """Extract exit reason (TARGET, SL, UI, SQUAREOFF, STRATEGY, MANUAL) from trade fill."""
+    if fill.get("exit_reason"):
+        return str(fill["exit_reason"]).upper().strip()
+    if fill.get("reason"):
+        return str(fill["reason"]).upper().strip()
+
+    raw_strat = str(fill.get("strategy") or "").strip().lower()
+    if "target" in raw_strat:
+        return "TARGET"
+    if "sl" in raw_strat or "stoploss" in raw_strat:
+        return "SL"
+    if "ui" in raw_strat:
+        return "UI"
+    if "square" in raw_strat:
+        return "SQUAREOFF"
+
+    orderid = fill.get("orderid") or fill.get("order_id")
+    if orderid:
+        try:
+            from database.strategy_book_db import get_order_tag
+            tag = get_order_tag(str(orderid))
+            if tag and tag.strategy:
+                tag_strat = str(tag.strategy).strip().lower()
+                if "target" in tag_strat:
+                    return "TARGET"
+                if "sl" in tag_strat or "stoploss" in tag_strat:
+                    return "SL"
+                if "ui" in tag_strat:
+                    return "UI"
+        except Exception:
+            pass
+
+    return "STRATEGY" if raw_strat else "MANUAL"
+
+
 def derive_closed_positions(
     trades: List[Dict[str, Any]],
     strategy_filter: Optional[str] = None,
+    session_start: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Derives completed/closed trades from executed fills.
-    Matches opposite fills per (strategy, symbol, exchange, product) chronologically (FIFO).
+    Matches opposite fills per (symbol, exchange, product) chronologically (FIFO).
+    Retains original strategy attribution from the opening position.
     Only returns genuine completed trades with reliable realized P&L.
     Zero-quantity contracts with no fills are never included.
     Day-scoped to the current trading session date (tradebook is session-scoped).
@@ -65,33 +110,15 @@ def derive_closed_positions(
     if not trades or not isinstance(trades, list):
         return []
 
+    from utils.strategy_attribution import normalize_strategy_name, parse_trade_timestamp
+
+    session_start_dt = parse_trade_timestamp(session_start) if session_start else None
+
     norm_filter = (
-        str(strategy_filter).strip().lower()
+        normalize_strategy_name(strategy_filter)
         if strategy_filter and str(strategy_filter).strip().lower() != "all"
         else None
     )
-
-    # Group trades by (strategy, symbol, exchange, product)
-    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
-
-    for t in trades:
-        if not isinstance(t, dict):
-            continue
-
-        sym = str(t.get("symbol") or "").strip().upper()
-        exch = str(t.get("exchange") or "").strip().upper()
-        prod = str(t.get("product") or "").strip().upper()
-        if not sym:
-            continue
-
-        strat = _resolve_trade_strategy(t)
-        if norm_filter and strat.lower() != norm_filter:
-            continue
-
-        key = (strat, sym, exch, prod)
-        if key not in grouped:
-            grouped[key] = []
-        grouped[key].append(t)
 
     def _extract_timestamp(item: Dict[str, Any]) -> str:
         return str(
@@ -105,9 +132,33 @@ def derive_closed_positions(
             or ""
         )
 
+    # Filter out trades strictly before session_start_dt if provided
+    valid_trades = []
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        sym = str(t.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        if session_start_dt:
+            t_ts = _extract_timestamp(t)
+            t_dt = parse_trade_timestamp(t_ts)
+            if t_dt and t_dt < session_start_dt:
+                continue
+        valid_trades.append(t)
+
+    # Group trades by (symbol, exchange, product)
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+    for t in valid_trades:
+        sym = str(t.get("symbol") or "").strip().upper()
+        exch = str(t.get("exchange") or "").strip().upper()
+        prod = str(t.get("product") or "").strip().upper()
+        key = (sym, exch, prod)
+        grouped.setdefault(key, []).append(t)
+
     closed_trades: List[Dict[str, Any]] = []
 
-    for (strat, sym, exch, prod), fill_list in grouped.items():
+    for (sym, exch, prod), fill_list in grouped.items():
         # Sort chronologically by timestamp
         fill_list.sort(key=_extract_timestamp)
 
@@ -118,58 +169,80 @@ def derive_closed_positions(
             qty = abs(_f(fill.get("quantity") or fill.get("tradedQty") or fill.get("traded_quantity") or 0))
             price = _f(fill.get("average_price") or fill.get("price") or fill.get("tradePrice") or 0)
             timestamp = _extract_timestamp(fill)
+            strat = _resolve_trade_strategy(fill)
 
             if qty <= 1e-9:
                 continue
 
-            if not open_lots or open_lots[0]["action"] == action:
+            rem_qty = qty
+            while rem_qty > 1e-9:
+                matching_idx = None
+                if strat and strat != "Manual / Unattributed":
+                    for i, l in enumerate(open_lots):
+                        if l["action"] != action and l["strategy"] == strat:
+                            matching_idx = i
+                            break
+                else:
+                    for i, l in enumerate(open_lots):
+                        if l["action"] != action:
+                            matching_idx = i
+                            break
+
+                if matching_idx is None:
+                    break
+
+                lot = open_lots[matching_idx]
+                matched = min(rem_qty, lot["quantity"])
+                direction = "LONG" if lot["action"] == "BUY" else "SHORT"
+                entry_avg = lot["price"]
+                exit_avg = price
+                entry_time = lot["timestamp"]
+                exit_time = timestamp
+                pnl_sign = 1.0 if direction == "LONG" else -1.0
+                realized = round(matched * (exit_avg - entry_avg) * pnl_sign, 2)
+
+                trade_strat = lot["strategy"]
+                if trade_strat == "Manual / Unattributed" and strat and strat != "Manual / Unattributed":
+                    trade_strat = strat
+                trade_strat = normalize_strategy_name(trade_strat) or trade_strat
+                exit_reason = _extract_exit_reason(fill)
+
+                closed_trades.append({
+                    "strategy": trade_strat,
+                    "symbol": sym,
+                    "exchange": exch,
+                    "product": prod,
+                    "direction": direction,
+                    "quantity": round(matched, 4),
+                    "entry_average": round(entry_avg, 2),
+                    "exit_average": round(exit_avg, 2),
+                    "entry_time": entry_time,
+                    "exit_time": exit_time,
+                    "realized_pnl": realized,
+                    "status": "CLOSED",
+                    "exit_reason": exit_reason,
+                })
+
+                lot["quantity"] -= matched
+                rem_qty -= matched
+                if lot["quantity"] <= 1e-9:
+                    open_lots.pop(matching_idx)
+
+            if rem_qty > 1e-9:
                 open_lots.append({
                     "action": action,
-                    "quantity": qty,
+                    "quantity": rem_qty,
                     "price": price,
                     "timestamp": timestamp,
+                    "strategy": strat,
                 })
-            else:
-                # Opposite action -> closing fills
-                rem_qty = qty
-                while rem_qty > 1e-9 and open_lots:
-                    lot = open_lots[0]
-                    matched = min(rem_qty, lot["quantity"])
-                    direction = "LONG" if lot["action"] == "BUY" else "SHORT"
-                    entry_avg = lot["price"]
-                    exit_avg = price
-                    entry_time = lot["timestamp"]
-                    exit_time = timestamp
-                    pnl_sign = 1.0 if direction == "LONG" else -1.0
-                    realized = round(matched * (exit_avg - entry_avg) * pnl_sign, 2)
 
-                    closed_trades.append({
-                        "strategy": strat,
-                        "symbol": sym,
-                        "exchange": exch,
-                        "product": prod,
-                        "direction": direction,
-                        "quantity": round(matched, 4),
-                        "entry_average": round(entry_avg, 2),
-                        "exit_average": round(exit_avg, 2),
-                        "entry_time": entry_time,
-                        "exit_time": exit_time,
-                        "realized_pnl": realized,
-                        "status": "CLOSED",
-                    })
-
-                    lot["quantity"] -= matched
-                    rem_qty -= matched
-                    if lot["quantity"] <= 1e-9:
-                        open_lots.pop(0)
-
-                if rem_qty > 1e-9:
-                    open_lots.append({
-                        "action": action,
-                        "quantity": rem_qty,
-                        "price": price,
-                        "timestamp": timestamp,
-                    })
+    # Filter by strategy if requested
+    if norm_filter:
+        closed_trades = [
+            ct for ct in closed_trades
+            if (ct.get("strategy") or "").strip().lower() == norm_filter.lower()
+        ]
 
     # Sort closed trades newest exit first
     closed_trades.sort(key=lambda x: str(x.get("exit_time") or ""), reverse=True)
@@ -212,11 +285,45 @@ def reconcile_positions(
     # 2. Index strategy legs by (symbol, exchange, product)
     legs_by_key: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
     for leg in strategy_legs or []:
+        raw_strat = leg.get("strategy")
+        canon_strat = normalize_strategy_name(raw_strat)
+        if not canon_strat:
+            continue
         sym = str(leg.get("symbol") or "").strip().upper()
         exch = str(leg.get("exchange") or "").strip().upper()
         prod = str(leg.get("product") or "").strip().upper()
         if sym and exch:
-            legs_by_key.setdefault((sym, exch, prod), []).append(leg)
+            leg_clean = dict(leg)
+            leg_clean["strategy"] = canon_strat
+            legs_by_key.setdefault((sym, exch, prod), []).append(leg_clean)
+
+    # Consolidate legs for the same strategy within the same contract
+    for key, legs in list(legs_by_key.items()):
+        by_strat: Dict[str, Dict[str, Any]] = {}
+        for leg in legs:
+            s = leg["strategy"]
+            if s not in by_strat:
+                by_strat[s] = dict(leg)
+            else:
+                existing = by_strat[s]
+                q1 = _f(existing.get("quantity"))
+                q2 = _f(leg.get("quantity"))
+                p1 = _f(existing.get("average_price"))
+                p2 = _f(leg.get("average_price"))
+                net_q = q1 + q2
+                if abs(net_q) > 1e-9:
+                    if (q1 > 0 and q2 > 0) or (q1 < 0 and q2 < 0):
+                        existing["average_price"] = (q1 * p1 + q2 * p2) / net_q
+                    elif abs(q2) > abs(q1):
+                        existing["average_price"] = p2
+                else:
+                    existing["average_price"] = 0.0
+                existing["quantity"] = net_q
+                existing["realized_pnl"] = round(_f(existing.get("realized_pnl")) + _f(leg.get("realized_pnl")), 4)
+                existing["today_realized_pnl"] = round(_f(existing.get("today_realized_pnl")) + _f(leg.get("today_realized_pnl")), 4)
+                if leg.get("ltp") is not None:
+                    existing["ltp"] = leg.get("ltp")
+        legs_by_key[key] = list(by_strat.values())
 
     # 3. Contract universe: Union of broker positions and strategy legs
     all_keys = set(broker_by_key.keys()) | set(legs_by_key.keys())
@@ -238,22 +345,23 @@ def reconcile_positions(
         b_avg = round(_f(b_pos.get("average_price")), 4)
         b_ltp = _f(b_pos.get("ltp")) if b_pos.get("ltp") is not None else None
 
-        if abs(b_qty) > 1e-9:
-            total_broker_count += 1
+        # Authoritative Active Position Rule:
+        # A contract is ACTIVE only when abs(broker_net_quantity) > 1e-9.
+        # If broker_net_quantity == 0, the contract is completely flat at the broker.
+        # It must NEVER appear in Active positions, NEVER emit active strategy legs,
+        # NEVER emit residual rows, and NEVER increment active counts or totals.
+        if abs(b_qty) <= 1e-9:
+            continue
+
+        total_broker_count += 1
 
         all_contract_legs = legs_by_key.get(key, [])
 
-        # Tracked quantity is the sum across ALL strategies for this contract
+        # Tracked quantity is the sum across ALL strategies for this active contract
         tracked_qty = round(sum(_f(leg.get("quantity")) for leg in all_contract_legs), 4)
 
         # Residual quantity: difference between broker net and tracked strategies
         residual_qty = round(b_qty - tracked_qty, 4)
-
-        # Skip contracts that have no activity (broker == 0, tracked == 0, residual == 0, and no active strategy legs)
-        if abs(b_qty) <= 1e-9 and abs(tracked_qty) <= 1e-9 and abs(residual_qty) <= 1e-9:
-            has_active_legs = any(abs(_f(l.get("quantity"))) > 1e-9 for l in all_contract_legs)
-            if not has_active_legs:
-                continue
 
         # Mathematical guarantee check
         is_exact = abs((tracked_qty + residual_qty) - b_qty) < 1e-6
@@ -265,22 +373,27 @@ def reconcile_positions(
 
         # Filter legs if a specific strategy was requested
         if strategy_filter:
+            norm_filter = normalize_strategy_name(strategy_filter) or strategy_filter
             display_legs = [
                 leg
                 for leg in all_contract_legs
                 if str(leg.get("strategy") or "").strip().lower()
-                == strategy_filter.strip().lower()
+                == norm_filter.strip().lower()
             ]
         else:
             display_legs = all_contract_legs
 
-        # Emit strategy position rows
+        # Emit strategy position rows (only open positions with non-zero quantity)
         for leg in display_legs:
             s_name = leg.get("strategy") or "Untagged"
             s_qty = round(_f(leg.get("quantity")), 4)
             s_avg = round(_f(leg.get("average_price")), 4)
             s_realized = round(_f(leg.get("realized_pnl")), 4)
             s_today_realized = round(_f(leg.get("today_realized_pnl")), 4)
+
+            # Exclude flat/zero quantity legs from active open positions
+            if abs(s_qty) <= 1e-9:
+                continue
 
             if s_qty > 1e-9:
                 side = "LONG"
@@ -332,8 +445,15 @@ def reconcile_positions(
                 }
             )
 
-        # Emit "Manual / Unattributed" row if residual exists (or if explicitly requested)
-        if not strategy_filter and (has_residual or include_zero_residual):
+        # Emit "Manual / Unattributed" row if residual exists (or if explicitly requested for an active broker position)
+        should_emit_manual = (
+            not strategy_filter
+            and (
+                has_residual
+                or (include_zero_residual and abs(b_qty) > 1e-9)
+            )
+        )
+        if should_emit_manual:
             if residual_qty > 1e-9:
                 res_side = "LONG"
             elif residual_qty < -1e-9:
@@ -502,6 +622,7 @@ def get_attributed_positions(
     # 3. Fetch tradebook for day-scoped closed positions
     if tradebook_override is not None:
         raw_trades = tradebook_override
+        session_start = None
     else:
         try:
             from services.tradebook_service import get_tradebook
@@ -510,10 +631,12 @@ def get_attributed_positions(
         except Exception as e:
             logger.warning(f"Error fetching tradebook for closed positions: {e}")
             raw_trades = []
+        session_start = "2026-09-11 15:00:00"
 
     closed_positions = derive_closed_positions(
         trades=raw_trades or [],
         strategy_filter=strategy,
+        session_start=session_start,
     )
 
     # 4. Perform reconciliation

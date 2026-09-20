@@ -251,25 +251,50 @@ def test_scenario_4_two_strategies_same_symbol_opposite_directions():
     contracts = result["contracts"]
     positions = result["positions"]
 
-    assert len(contracts) == 1
-    c = contracts[0]
-    assert c["broker_quantity"] == 0.0
-    assert c["tracked_quantity"] == 0.0
-    assert c["residual_quantity"] == 0.0
-    assert c["reconciliation_status"] == "RECONCILED"
+    # Authoritative Active Rule: when broker net is 0, contract is flat and NOT active
+    assert len(contracts) == 0
+    assert len(positions) == 0
 
-    strat_sum, residual = _sum_quantities(c, positions)
+    # Opposite directions with non-zero broker net: both strategy positions must be preserved
+    broker_positions_active = [
+        {
+            "symbol": "BANKBARODA",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 50.0,
+            "average_price": 22.50,
+            "ltp": 22.55,
+            "pnl": 2.5,
+        }
+    ]
+    strategy_legs_active = [
+        {
+            "strategy": "ICHI_V2",
+            "symbol": "BANKBARODA",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 100.0,
+            "average_price": 22.50,
+            "realized_pnl": 0.0,
+            "today_realized_pnl": 0.0,
+        },
+        {
+            "strategy": "MACD_FNO",
+            "symbol": "BANKBARODA",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": -50.0,
+            "average_price": 22.60,
+            "realized_pnl": 0.0,
+            "today_realized_pnl": 0.0,
+        },
+    ]
+    res_active = reconcile_positions(broker_positions_active, strategy_legs_active)
+    assert len(res_active["contracts"]) == 1
+    assert len(res_active["positions"]) == 2
+    c = res_active["contracts"][0]
+    strat_sum, residual = _sum_quantities(c, res_active["positions"])
     assert round(strat_sum + residual, 4) == c["broker_quantity"]
-
-    # Both strategy positions must be preserved
-    assert len(positions) == 2
-    ichi = next(p for p in positions if p["strategy"] == "ICHI_V2")
-    macd = next(p for p in positions if p["strategy"] == "MACD_FNO")
-
-    assert ichi["signed_quantity"] == 100.0
-    assert ichi["side"] == "LONG"
-    assert macd["signed_quantity"] == -100.0
-    assert macd["side"] == "SHORT"
 
 
 def test_scenario_5_partial_fills():
@@ -442,18 +467,15 @@ def test_scenario_8_zero_broker_quantity_with_active_strategy():
     contracts = result["contracts"]
     positions = result["positions"]
 
-    c = contracts[0]
-    assert c["broker_quantity"] == 0.0
-    assert c["tracked_quantity"] == 500.0
-    assert c["residual_quantity"] == -500.0
-    assert c["reconciliation_status"] == "RECONCILED"
-
-    strat_sum, residual = _sum_quantities(c, positions)
-    assert round(strat_sum + residual, 4) == c["broker_quantity"]
-
-    manual = next(p for p in positions if p["strategy"] == "Manual / Unattributed")
-    assert manual["signed_quantity"] == -500.0
-    assert manual["side"] == "SHORT"
+    # Authoritative Active Position Rule:
+    # A contract may appear in Active Positions ONLY when abs(broker_net_quantity) > 1e-9.
+    # When broker_quantity == 0, the contract is completely flat:
+    # - NEVER show the contract in Active Positions (len(positions) == 0)
+    # - NEVER show its strategy leg in Active
+    # - NEVER create a Manual / Unattributed residual row
+    # - NEVER create a synthetic balancing position
+    assert len(contracts) == 0
+    assert len(positions) == 0
 
 
 def test_scenario_9_no_strategy_records():
@@ -984,5 +1006,799 @@ def test_daily_reset_with_no_trades_returns_empty_closed():
     assert result["closed_positions"] == []
     assert result["positions"] == []
     assert result["contracts"] == []
+
+
+# ============================================================================
+# REGRESSION TESTS VERIFYING ALL 9 CRITICAL USER REQUIREMENTS
+# ============================================================================
+
+def test_requirement_1_and_2_and_3_strategy_normalization_and_no_unwanted_buckets():
+    """
+    Requirements 1, 2, 3:
+    1. Strategy Overview returns canonical Macdfno and Emacrossopen.
+    2. MACD_FNO_V1 normalizes to Macdfno and cannot reappear.
+    3. UI Exit Position and Manual / Unattributed cannot become strategy buckets.
+    """
+    from utils.strategy_attribution import normalize_strategy_name, is_authoritative_strategy
+
+    assert normalize_strategy_name("MACD_FNO_V1") == "Macdfno"
+    assert normalize_strategy_name("macd_fno_v1") == "Macdfno"
+    assert normalize_strategy_name("macdfno") == "Macdfno"
+    assert normalize_strategy_name("Macdfno") == "Macdfno"
+
+    assert normalize_strategy_name("EMACROSS_FNO_PAPER") == "Emacrossopen"
+    assert normalize_strategy_name("emacrossopen") == "Emacrossopen"
+    assert normalize_strategy_name("Emacrossopen") == "Emacrossopen"
+
+    # Disallowed system tags return None
+    assert normalize_strategy_name("UI Exit Position") is None
+    assert normalize_strategy_name("ui_exit_position") is None
+    assert normalize_strategy_name("Manual / Unattributed") is None
+    assert normalize_strategy_name("untagged") is None
+    assert normalize_strategy_name("") is None
+    assert normalize_strategy_name(None) is None
+
+
+def test_requirement_4_no_manual_unattributed_when_broker_net_is_zero():
+    """
+    Requirement 4:
+    Manual / Unattributed is NOT generated when broker net quantity is zero
+    and there is no genuine residual position.
+    """
+    broker_positions = [
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 670.0,
+        }
+    ]
+    strategy_legs = []
+
+    # Even with include_zero_residual=True, when broker_quantity is 0,
+    # Manual / Unattributed must NEVER be emitted!
+    result = reconcile_positions(
+        broker_positions,
+        strategy_legs,
+        include_zero_residual=True,
+    )
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+    assert not any(p.get("strategy") == "Manual / Unattributed" for p in result["positions"])
+
+
+def test_requirement_5_6_7_hindalco_and_tatasteel_complete_exit_scenario():
+    """
+    Requirements 5, 6, 7:
+    5. Current-session entry followed by exit appears exactly once in Closed.
+    6. Closed trade retains original strategy attribution (Macdfno).
+    7. Active becomes zero after a genuine complete exit (no phantom HINDALCO/TATASTEEL).
+    """
+    trades = [
+        # HINDALCO entry under MACD_FNO_V1
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 700.0,
+            "price": 665.0,
+            "trade_time": "2026-09-11 15:10:00",
+            "strategy": "MACD_FNO_V1",
+        },
+        # HINDALCO exit via UI exit (untagged or UI exit)
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 700.0,
+            "price": 670.0,
+            "trade_time": "2026-09-11 15:25:00",
+            "strategy": "UI Exit Position",
+        },
+        # TATASTEEL entry under MACD_FNO_V1
+        {
+            "symbol": "TATASTEEL29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 2750.0,
+            "price": 140.0,
+            "trade_time": "2026-09-11 15:15:00",
+            "strategy": "MACD_FNO_V1",
+        },
+        # TATASTEEL exit via UI exit
+        {
+            "symbol": "TATASTEEL29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 2750.0,
+            "price": 142.0,
+            "trade_time": "2026-09-11 15:30:00",
+            "strategy": "UI Exit Position",
+        },
+    ]
+
+    # Broker positions at flat (net 0)
+    broker_positions = [
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 670.0,
+        },
+        {
+            "symbol": "TATASTEEL29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 142.0,
+        },
+    ]
+    # Strategy legs also 0 after exit
+    strategy_legs = []
+
+    result = reconcile_positions(
+        broker_positions=broker_positions,
+        strategy_legs=strategy_legs,
+        trades=trades,
+        include_zero_residual=True,
+    )
+
+    # 1. Active positions MUST BE ZERO
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+
+    # 2. Closed positions MUST CONTAIN EXACTLY 2 TRADES
+    closed = result["closed_positions"]
+    assert len(closed) == 2
+
+    hindalco_closed = next(c for c in closed if c["symbol"] == "HINDALCO29SEP26FUT")
+    # Original strategy attribution retained and normalized to Macdfno
+    assert hindalco_closed["strategy"] == "Macdfno"
+    assert hindalco_closed["quantity"] == 700.0
+    assert hindalco_closed["direction"] == "LONG"
+    assert hindalco_closed["entry_average"] == 665.0
+    assert hindalco_closed["exit_average"] == 670.0
+    assert hindalco_closed["realized_pnl"] == 3500.0  # 700 * (670 - 665)
+    assert hindalco_closed["status"] == "CLOSED"
+
+    tatasteel_closed = next(c for c in closed if c["symbol"] == "TATASTEEL29SEP26FUT")
+    assert tatasteel_closed["strategy"] == "Macdfno"
+    assert tatasteel_closed["quantity"] == 2750.0
+    assert tatasteel_closed["direction"] == "LONG"
+    assert tatasteel_closed["entry_average"] == 140.0
+    assert tatasteel_closed["exit_average"] == 142.0
+    assert tatasteel_closed["realized_pnl"] == 5500.0  # 2750 * (142 - 140)
+    assert tatasteel_closed["status"] == "CLOSED"
+
+    # Disallowed buckets must NOT appear in closed
+    for c in closed:
+        assert c["strategy"] != "MACD_FNO_V1"
+        assert c["strategy"] != "UI Exit Position"
+        assert c["strategy"] != "Manual / Unattributed"
+
+
+def test_requirement_8_refresh_does_not_duplicate_closed_trades():
+    """
+    Requirement 8:
+    Refresh or restart does not duplicate closed trades.
+    Multiple invocations with the same trades return identical closed trades.
+    """
+    trades = [
+        {
+            "symbol": "TATASTEEL29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 2750.0,
+            "price": 140.0,
+            "trade_time": "2026-09-11 15:15:00",
+            "strategy": "MACD_FNO_V1",
+        },
+        {
+            "symbol": "TATASTEEL29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 2750.0,
+            "price": 142.0,
+            "trade_time": "2026-09-11 15:30:00",
+            "strategy": "MACD_FNO_V1",
+        },
+    ]
+
+    closed_pass_1 = derive_closed_positions(trades)
+    closed_pass_2 = derive_closed_positions(trades)
+
+    assert len(closed_pass_1) == 1
+    assert len(closed_pass_2) == 1
+    assert closed_pass_1[0] == closed_pass_2[0]
+
+
+def test_session_start_filtering_drops_pre_reset_trades():
+    """
+    Verify session_start filter drops trades from before the 2026-09-11 15:00 IST reset.
+    """
+    trades = [
+        # Pre-reset trade (before 15:00 IST)
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100,
+            "price": 1500.0,
+            "trade_time": "2026-09-11 14:30:00",
+            "strategy": "Macdfno",
+        },
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100,
+            "price": 1510.0,
+            "trade_time": "2026-09-11 14:45:00",
+            "strategy": "Macdfno",
+        },
+        # Post-reset trade (after 15:00 IST)
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 700,
+            "price": 665.0,
+            "trade_time": "2026-09-11 15:10:00",
+            "strategy": "Macdfno",
+        },
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 700,
+            "price": 670.0,
+            "trade_time": "2026-09-11 15:25:00",
+            "strategy": "Macdfno",
+        },
+    ]
+
+    closed = derive_closed_positions(trades, session_start="2026-09-11 15:00:00")
+    # Only the post-reset trade is included!
+    assert len(closed) == 1
+    assert closed[0]["symbol"] == "HINDALCO29SEP26FUT"
+    assert closed[0]["realized_pnl"] == 3500.0
+
+
+# ============================================================================
+# MANDATORY 15 AUTOMATED TESTS (SPECIFIED IN FINAL IMPLEMENTATION INSTRUCTION)
+# ============================================================================
+
+def test_1_entry_only():
+    """1. Entry only: Broker +100 -> Active 100, Closed 0."""
+    broker_positions = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 100.0,
+            "average_price": 500.0,
+            "ltp": 510.0,
+        }
+    ]
+    strategy_legs = [
+        {
+            "strategy": "Macdfno",
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 100.0,
+            "average_price": 500.0,
+        }
+    ]
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        }
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 1
+    assert result["positions"][0]["quantity"] == 100.0
+    assert result["positions"][0]["strategy"] == "Macdfno"
+    assert len(result["closed_positions"]) == 0
+
+
+def test_2_full_target_exit():
+    """2. Full Target exit: +100 -> 0 -> Active 0, Closed 100."""
+    broker_positions = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 520.0,
+        }
+    ]
+    strategy_legs = []
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 520.0,
+            "strategy": "target_exit",
+            "trade_time": "2026-09-20 10:30:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+    assert len(result["closed_positions"]) == 1
+    c = result["closed_positions"][0]
+    assert c["strategy"] == "Macdfno"
+    assert c["quantity"] == 100.0
+    assert c["realized_pnl"] == 2000.0
+    assert c["status"] == "CLOSED"
+
+
+def test_3_full_sl_exit():
+    """3. Full SL exit: +100 -> 0 -> Active 0, Closed 100."""
+    broker_positions = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 490.0,
+        }
+    ]
+    strategy_legs = []
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 490.0,
+            "strategy": "sl_exit",
+            "trade_time": "2026-09-20 10:15:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+    assert len(result["closed_positions"]) == 1
+    c = result["closed_positions"][0]
+    assert c["strategy"] == "Macdfno"
+    assert c["quantity"] == 100.0
+    assert c["realized_pnl"] == -1000.0
+
+
+def test_4_ui_manual_exit():
+    """4. UI/manual exit: +100 -> 0 -> Active 0, Closed 100, Strategy remains original strategy."""
+    broker_positions = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 505.0,
+        }
+    ]
+    strategy_legs = []
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 505.0,
+            "strategy": "UI Exit Position",
+            "trade_time": "2026-09-20 10:20:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 0
+    assert len(result["closed_positions"]) == 1
+    c = result["closed_positions"][0]
+    assert c["strategy"] == "Macdfno"
+    assert c["quantity"] == 100.0
+    assert c["realized_pnl"] == 500.0
+
+
+def test_5_external_manual_broker_exit():
+    """5. External/manual broker exit: +100 -> 0 -> Active 0, Closed when matching executed fills exist."""
+    broker_positions = [
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 1520.0,
+        }
+    ]
+    strategy_legs = []
+    trades = [
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 1500.0,
+            "strategy": "Emacrossopen",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 1520.0,
+            "strategy": None,  # Untagged external/manual Fyers terminal exit
+            "trade_time": "2026-09-20 10:45:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 0
+    assert len(result["closed_positions"]) == 1
+    c = result["closed_positions"][0]
+    assert c["strategy"] == "Emacrossopen"
+    assert c["quantity"] == 100.0
+    assert c["realized_pnl"] == 2000.0
+
+
+def test_6_partial_exit():
+    """6. Partial exit: +1000 -> +400 -> Active 400, Closed 600."""
+    broker_positions = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 400.0,
+            "average_price": 2500.0,
+            "ltp": 2550.0,
+        }
+    ]
+    strategy_legs = [
+        {
+            "strategy": "Macdfno",
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 400.0,
+            "average_price": 2500.0,
+        }
+    ]
+    trades = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 1000.0,
+            "price": 2500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 09:30:00",
+        },
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 600.0,
+            "price": 2550.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 1
+    assert result["positions"][0]["quantity"] == 400.0
+    assert len(result["closed_positions"]) == 1
+    assert result["closed_positions"][0]["quantity"] == 600.0
+    assert result["closed_positions"][0]["realized_pnl"] == 30000.0
+
+
+def test_7_final_partial_exit():
+    """7. Final partial exit: +400 -> 0 -> Active 0, Closed total 1000."""
+    broker_positions = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 2600.0,
+        }
+    ]
+    strategy_legs = []
+    trades = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 1000.0,
+            "price": 2500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 09:30:00",
+        },
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 600.0,
+            "price": 2550.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 400.0,
+            "price": 2600.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 11:00:00",
+        },
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, trades=trades)
+    assert len(result["positions"]) == 0
+    assert len(result["closed_positions"]) == 2
+    total_closed_qty = sum(c["quantity"] for c in result["closed_positions"])
+    assert total_closed_qty == 1000.0
+
+
+def test_8_broker_zero_stale_tracked_quantity():
+    """8. Broker zero + stale tracked quantity: Broker 0 / Tracked 700 -> Active = 0."""
+    broker_positions = [
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 670.0,
+        }
+    ]
+    strategy_legs = [
+        {
+            "strategy": "Macdfno",
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 700.0,
+            "average_price": 665.0,
+        }
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs)
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+
+
+def test_9_broker_zero_synthetic_residual():
+    """9. Broker zero + synthetic residual: Broker 0 / Tracked 700 / Residual -700 -> Active = 0, No Manual row."""
+    broker_positions = [
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 670.0,
+        }
+    ]
+    strategy_legs = [
+        {
+            "strategy": "Macdfno",
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 700.0,
+            "average_price": 665.0,
+        }
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs, include_zero_residual=True)
+    assert len(result["positions"]) == 0
+    assert len(result["contracts"]) == 0
+    assert not any(p.get("strategy") == "Manual / Unattributed" for p in result["positions"])
+
+
+def test_10_no_executed_fills():
+    """10. No executed fills: Broker 0 -> Do NOT fabricate Closed position."""
+    broker_positions = [
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 140.0,
+        }
+    ]
+    result = reconcile_positions(broker_positions, strategy_legs=[], trades=[])
+    assert len(result["positions"]) == 0
+    assert len(result["closed_positions"]) == 0
+
+
+def test_11_target_sl_exit_with_legacy_ui_tag():
+    """11. Target/SL exit with legacy/UI tag: Closed under original canonical strategy."""
+    trades = [
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "BUY",
+            "quantity": 700.0,
+            "price": 665.0,
+            "strategy": "MACD_FNO_V1",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "HINDALCO29SEP26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 700.0,
+            "price": 670.0,
+            "strategy": "UI Exit Position",
+            "trade_time": "2026-09-20 10:30:00",
+        },
+    ]
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    assert closed[0]["strategy"] == "Macdfno"
+    assert closed[0]["quantity"] == 700.0
+    assert closed[0]["realized_pnl"] == 3500.0
+
+
+def test_12_refresh_reload():
+    """12. Refresh/reload: Closed quantity/P&L does not duplicate."""
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 510.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:30:00",
+        },
+    ]
+    pass_1 = derive_closed_positions(trades)
+    pass_2 = derive_closed_positions(trades)
+    assert len(pass_1) == 1
+    assert len(pass_2) == 1
+    assert pass_1[0]["quantity"] == pass_2[0]["quantity"]
+    assert pass_1[0]["realized_pnl"] == pass_2[0]["realized_pnl"]
+
+
+def test_13_restart():
+    """13. Restart: Active/Closed result remains identical."""
+    broker_positions = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "quantity": 0.0,
+            "average_price": 0.0,
+            "ltp": 510.0,
+        }
+    ]
+    trades = [
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 100.0,
+            "price": 500.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:00:00",
+        },
+        {
+            "symbol": "SBIN",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 100.0,
+            "price": 510.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 10:30:00",
+        },
+    ]
+    run_1 = reconcile_positions(broker_positions, [], trades=trades)
+    run_2 = reconcile_positions(broker_positions, [], trades=trades)
+    assert run_1["positions"] == run_2["positions"]
+    assert run_1["closed_positions"] == run_2["closed_positions"]
+
+
+def test_14_macd_fno_v1():
+    """14. MACD_FNO_V1: Normalize to Macdfno."""
+    from utils.strategy_attribution import normalize_strategy_name
+    assert normalize_strategy_name("MACD_FNO_V1") == "Macdfno"
+    assert normalize_strategy_name("macd_fno_v1") == "Macdfno"
+    assert normalize_strategy_name("macdfno_v1") == "Macdfno"
+
+
+def test_15_ui_exit_position():
+    """15. UI Exit Position: Never becomes a strategy bucket."""
+    from utils.strategy_attribution import normalize_strategy_name
+    assert normalize_strategy_name("UI Exit Position") is None
+    assert normalize_strategy_name("ui_exit_position") is None
+    assert normalize_strategy_name("ui exit") is None
+    assert normalize_strategy_name("Manual / Unattributed") is None
+    assert normalize_strategy_name("target_exit") is None
+    assert normalize_strategy_name("sl_exit") is None
+
 
 

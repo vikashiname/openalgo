@@ -224,7 +224,7 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
     expect(screen.getAllByText('SHORT').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('handles edge case: strategy opposite positions when broker net is 0', async () => {
+  it('enforces authoritative rule: flat broker position is not shown in Active', async () => {
     // Broker returns empty or 0 net
     const brokerPositions: Position[] = []
 
@@ -250,47 +250,15 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
           residual_quantity: 0,
           reconciliation_status: 'RECONCILED',
         },
-        {
-          strategy: 'MACD_FNO',
-          symbol: 'NIFTY26SEP24000CE',
-          exchange: 'NFO',
-          product: 'NRML',
-          signed_quantity: -100,
-          side: 'SHORT',
-          quantity: 100,
-          average_price: 155.0,
-          ltp: 160.0,
-          realized_pnl: 0,
-          today_realized_pnl: 0,
-          unrealized_pnl: -500.0,
-          total_pnl: -500.0,
-          pnlpercent: -3.23,
-          broker_quantity: 0,
-          tracked_quantity: 0,
-          residual_quantity: 0,
-          reconciliation_status: 'RECONCILED',
-        },
       ],
-      contracts: [
-        {
-          symbol: 'NIFTY26SEP24000CE',
-          exchange: 'NFO',
-          product: 'NRML',
-          broker_quantity: 0,
-          tracked_quantity: 0,
-          residual_quantity: 0,
-          has_residual: false,
-          strategies_count: 2,
-          reconciliation_status: 'RECONCILED',
-        },
-      ],
+      contracts: [],
       summary: {
         total_broker_positions: 0,
-        total_tracked_positions: 2,
+        total_tracked_positions: 0,
         total_residual_positions: 0,
         total_realized_pnl: 0,
-        total_unrealized_pnl: 500.0,
-        total_pnl: 500.0,
+        total_unrealized_pnl: 0,
+        total_pnl: 0,
         reconciliation_status: 'RECONCILED',
       },
     }
@@ -300,24 +268,10 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
 
     render(<Positions />)
 
-    // Contract row is rendered even with broker net 0
+    // Flat broker position must NOT appear in Active positions table
     await waitFor(() => {
-      expect(screen.getByText('NIFTY26SEP24000CE')).toBeInTheDocument()
-    })
-
-    expect(screen.getByText('Broker Net:')).toBeInTheDocument()
-    expect(screen.getByText('Tracked:')).toBeInTheDocument()
-    expect(screen.getByText('✓ RECONCILED')).toBeInTheDocument()
-
-    // Expand to verify both offsetting legs
-    const expandButton = screen.getByLabelText('Expand NIFTY26SEP24000CE')
-    fireEvent.click(expandButton)
-
-    await waitFor(() => {
-      expect(screen.getByText('LONG')).toBeInTheDocument()
-      expect(screen.getByText('SHORT')).toBeInTheDocument()
-      expect(screen.getByText('100')).toBeInTheDocument()
-      expect(screen.getByText('-100')).toBeInTheDocument()
+      expect(screen.queryByText('NIFTY26SEP24000CE')).not.toBeInTheDocument()
+      expect(screen.getByText('No active positions')).toBeInTheDocument()
     })
   })
 

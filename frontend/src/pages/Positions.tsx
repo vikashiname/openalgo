@@ -78,6 +78,46 @@ import { showToast } from '@/utils/toast'
 
 const STORAGE_KEY = 'openalgo_positions_prefs'
 
+export const AUTHORITATIVE_STRATEGIES = ['Macdfno', 'Emacrossopen'] as const
+
+const DISALLOWED_TAGS = new Set([
+  'ui exit position',
+  'ui_exit_position',
+  'ui exit',
+  'manual / unattributed',
+  'manual_/_unattributed',
+  'manual',
+  'unattributed',
+  'untagged',
+  'unknown',
+  'target_exit',
+  'sl_exit',
+  'stoploss_exit',
+  'squareoff',
+  'square_off',
+  'exit',
+])
+
+export function normalizeStrategy(name?: string | null): string | null {
+  if (!name) return null
+  const cleaned = name.trim()
+  const lower = cleaned.toLowerCase()
+  if (DISALLOWED_TAGS.has(lower) || DISALLOWED_TAGS.has(lower.replace(/-/g, '_'))) {
+    return null
+  }
+  if (lower === 'macdfno' || lower === 'macd_fno_v1' || lower === 'macdfno_v1') {
+    return 'Macdfno'
+  }
+  if (
+    lower === 'emacrossopen' ||
+    lower === 'emacross_fno_paper' ||
+    lower === 'emacross_open'
+  ) {
+    return 'Emacrossopen'
+  }
+  return cleaned
+}
+
 type GroupingType = 'none' | 'underlying' | 'underlying_expiry'
 type SortColumn = 0 | 3 | 4 | 6 | 7 | null
 type SortDirection = 'asc' | 'desc'
@@ -226,7 +266,10 @@ export default function Positions() {
       if (saved) {
         const prefs: Preferences = JSON.parse(saved)
         if (prefs.grouping) setGrouping(prefs.grouping)
-        if (prefs.strategy) setSelectedStrategy(prefs.strategy)
+        if (prefs.strategy) {
+          const norm = normalizeStrategy(prefs.strategy)
+          setSelectedStrategy(norm || 'all')
+        }
         if (prefs.filters)
           setFilters({
             product: prefs.filters.product || [],
@@ -310,13 +353,15 @@ export default function Positions() {
           // Handle Edge Case 1: Strategy opposite positions or contracts present in attribution
           // where broker_quantity === 0 (or not returned by broker in positionbook).
           // If a contract exists in attribution but not in basePositions, inject a synthetic position
-          // so that the contract row is rendered and can be expanded.
+          // Handle Edge Case: Strategy contracts present in attribution where broker_quantity != 0
+          // but not yet in basePositions. Flat broker contracts are NEVER injected into Active.
           const existingKeys = new Set(
             basePositions.map((p) => getContractKey(p.symbol, p.exchange, p.product))
           )
 
           const syntheticPositions: Position[] = []
           for (const contract of attrData.contracts || []) {
+            if (Math.abs(contract.broker_quantity || 0) <= 1e-9) continue
             const key = getContractKey(contract.symbol, contract.exchange, contract.product)
             if (!existingKeys.has(key)) {
               const legs = (attrData.positions || []).filter(
@@ -341,32 +386,16 @@ export default function Positions() {
             basePositions = [...basePositions, ...syntheticPositions]
           }
 
-          // Filter out stale zero-quantity entries:
-          // A position should be considered ACTIVE only when:
-          // broker_quantity != 0 || tracked_quantity != 0 || abs(residual_quantity) > 1e-9
-          // (or if it has active strategy legs)
-          basePositions = basePositions.filter((p) => {
-            const key = getContractKey(p.symbol, p.exchange, p.product)
-            const rec = recMap.get(key)
-            if (rec) {
-              const isZero =
-                rec.broker_quantity === 0 &&
-                rec.tracked_quantity === 0 &&
-                Math.abs(rec.residual_quantity) <= 1e-9
-              if (isZero && (rec.strategies_count ?? 0) === 0) {
-                return false
-              }
-              return true
-            }
-            // If not found in reconciliation contracts, active only if broker quantity != 0
-            return (p.quantity || 0) !== 0
-          })
+          // Authoritative Active Position Rule:
+          // A position is considered ACTIVE only when broker net quantity is non-zero (abs(quantity) > 1e-9).
+          // Stale tracking or residual quantity must NEVER keep a flat broker position in Active.
+          basePositions = basePositions.filter((p) => Math.abs(p.quantity || 0) > 1e-9)
 
           setPositions(basePositions)
         } else if (hasValidPosData) {
           // Attribution data not available, but base positions succeeded:
           // Filter base positions by non-zero broker quantity
-          basePositions = basePositions.filter((p) => (p.quantity || 0) !== 0)
+          basePositions = basePositions.filter((p) => Math.abs(p.quantity || 0) > 1e-9)
           setPositions(basePositions)
           setError(null)
         } else {
@@ -468,31 +497,25 @@ export default function Positions() {
     return map
   }, [attributedData])
 
-  // Available strategies for filtering
+  // Available strategies for filtering (excludes disallowed/system tags)
   const availableStrategies = useMemo(() => {
     const set = new Set<string>()
     if (attributedData?.positions) {
       for (const p of attributedData.positions) {
-        if (p.strategy) {
-          set.add(p.strategy)
-        }
+        const canon = normalizeStrategy(p.strategy)
+        if (canon) set.add(canon)
       }
     }
     if (attributedData?.closed_positions) {
       for (const cp of attributedData.closed_positions) {
-        if (cp.strategy) {
-          set.add(cp.strategy)
-        }
+        const canon = normalizeStrategy(cp.strategy)
+        if (canon) set.add(canon)
       }
     }
-    return Array.from(set).sort((a, b) => {
-      if (a === 'Manual / Unattributed') return 1
-      if (b === 'Manual / Unattributed') return -1
-      return a.localeCompare(b)
-    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [attributedData])
 
-  // Strategy summary statistics
+  // Strategy summary statistics: strictly excludes disallowed tags like Manual / Unattributed & UI Exit Position
   const strategyStats = useMemo(() => {
     if (!attributedData?.positions && !attributedData?.closed_positions) return []
 
@@ -509,19 +532,25 @@ export default function Positions() {
     >()
 
     for (const pos of attributedData?.positions || []) {
-      const sName = pos.strategy || 'Untagged'
-      let entry = statsMap.get(sName)
-      if (!entry) {
-        entry = { name: sName, count: 0, closedCount: 0, totalPnl: 0, unrealizedPnl: 0, realizedPnl: 0 }
-        statsMap.set(sName, entry)
-      }
+      const canon = normalizeStrategy(pos.strategy)
+      if (!canon) continue
 
-      // Read parent contract's live LTP
+      // Authoritative Rule: Strategy active count must only count broker-active contracts
       const parent = enhancedPositions.find(
         (ep) =>
           getContractKey(ep.symbol, ep.exchange, ep.product) ===
           getContractKey(pos.symbol, pos.exchange, pos.product)
       )
+      const brokerQty = parent ? parent.quantity || 0 : pos.broker_quantity || 0
+      if (Math.abs(brokerQty) <= 1e-9) continue
+
+      let entry = statsMap.get(canon)
+      if (!entry) {
+        entry = { name: canon, count: 0, closedCount: 0, totalPnl: 0, unrealizedPnl: 0, realizedPnl: 0 }
+        statsMap.set(canon, entry)
+      }
+
+      // Read parent contract's live LTP
       const ltp = parent?.ltp ?? pos.ltp
 
       let unrealized = pos.unrealized_pnl
@@ -540,18 +569,20 @@ export default function Positions() {
 
     if (attributedData?.closed_positions) {
       for (const cp of attributedData.closed_positions) {
-        const sName = cp.strategy || 'Untagged'
-        let entry = statsMap.get(sName)
+        const canon = normalizeStrategy(cp.strategy)
+        if (!canon) continue
+
+        let entry = statsMap.get(canon)
         if (!entry) {
           entry = {
-            name: sName,
+            name: canon,
             count: 0,
             closedCount: 1,
             totalPnl: cp.realized_pnl,
             unrealizedPnl: 0,
             realizedPnl: cp.realized_pnl,
           }
-          statsMap.set(sName, entry)
+          statsMap.set(canon, entry)
         } else {
           entry.closedCount += 1
           entry.realizedPnl += cp.realized_pnl
@@ -560,11 +591,10 @@ export default function Positions() {
       }
     }
 
-    return Array.from(statsMap.values()).sort((a, b) => {
-      if (a.name === 'Manual / Unattributed') return 1
-      if (b.name === 'Manual / Unattributed') return -1
-      return b.totalPnl - a.totalPnl
-    })
+    // Display a strategy card only when activeCount > 0 OR closedCount > 0
+    return Array.from(statsMap.values())
+      .filter((s) => s.count > 0 || s.closedCount > 0)
+      .sort((a, b) => b.totalPnl - a.totalPnl)
   }, [attributedData, enhancedPositions])
 
   // Filtered closed positions based on selectedStrategy
@@ -599,7 +629,7 @@ export default function Positions() {
         return parsed.expiry ? `${parsed.underlying} - ${parsed.expiry}` : parsed.underlying
       }
 
-      return parsed.underlying
+      return 'Other'
     },
     [grouping]
   )
@@ -607,21 +637,10 @@ export default function Positions() {
   // Filter positions (use enhancedPositions for real-time LTP/PnL)
   const filteredPositions = useMemo(() => {
     return enhancedPositions.filter((pos) => {
-      // Stale / Zero position cleanup:
-      // An OpenAlgo position is considered ACTIVE only when:
-      // broker_quantity != 0 || tracked_quantity != 0 || abs(residual_quantity) > 1e-9
-      // If broker == 0 AND tracked == 0 AND residual == 0 (and no active strategy legs), hide it.
-      const cKey = getContractKey(pos.symbol, pos.exchange, pos.product)
-      const rec = contractRecMap.get(cKey)
-      if (rec) {
-        const isZero =
-          rec.broker_quantity === 0 &&
-          rec.tracked_quantity === 0 &&
-          Math.abs(rec.residual_quantity) <= 1e-9
-        if (isZero && (rec.strategies_count ?? 0) === 0) {
-          return false
-        }
-      } else if ((pos.quantity || 0) === 0) {
+      // Authoritative Active Position Rule:
+      // A contract may appear in Active Positions ONLY when abs(broker_net_quantity) > 1e-9.
+      // Stale tracking, residual quantity, or strategy counts must NEVER keep a flat broker position in Active.
+      if (Math.abs(pos.quantity || 0) <= 1e-9) {
         return false
       }
 
@@ -794,11 +813,28 @@ export default function Positions() {
 
   const handleClosePosition = async (position: Position) => {
     try {
-      const response = await tradingApi.closePosition(
-        position.symbol,
-        position.exchange,
-        position.product
-      )
+      const cKey = getContractKey(position.symbol, position.exchange, position.product)
+      const legs = contractLegsMap.get(cKey) || []
+      const activeLeg = legs.find((l) => Math.abs(l.signed_quantity) > 1e-9)
+      const targetStrategy =
+        selectedStrategy !== 'all'
+          ? selectedStrategy
+          : activeLeg
+          ? activeLeg.strategy
+          : undefined
+
+      const response = targetStrategy
+        ? await tradingApi.closePosition(
+            position.symbol,
+            position.exchange,
+            position.product,
+            targetStrategy
+          )
+        : await tradingApi.closePosition(
+            position.symbol,
+            position.exchange,
+            position.product
+          )
       if (response.status === 'success') {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
@@ -2036,7 +2072,7 @@ export default function Positions() {
                             variant="outline"
                             className="text-[10px] text-muted-foreground bg-muted/40"
                           >
-                            CLOSED
+                            {pos.exit_reason ? `CLOSED (${pos.exit_reason})` : 'CLOSED'}
                           </Badge>
                         </TableCell>
                       </TableRow>

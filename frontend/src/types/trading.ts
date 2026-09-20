@@ -191,6 +191,7 @@ export interface ClosedPosition {
   exit_time: string
   realized_pnl: number
   status: 'CLOSED'
+  exit_reason?: string
 }
 
 export interface AttributedPositionsData {
