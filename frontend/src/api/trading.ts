@@ -162,7 +162,7 @@ export const tradingApi = {
   getAttributedPositions: async (
     apiKey: string,
     strategy?: string,
-    includeZeroResidual: boolean = true
+    includeZeroResidual: boolean = false
   ): Promise<ApiResponse<AttributedPositionsData>> => {
     const payload: { apikey: string; strategy?: string; include_zero_residual?: boolean } = {
       apikey: apiKey,
@@ -282,14 +282,19 @@ export const tradingApi = {
   closePosition: async (
     symbol: string,
     exchange: string,
-    product: string
+    product: string,
+    strategy?: string
   ): Promise<ApiResponse<void>> => {
     // Uses the web route which handles session-based auth with CSRF
-    const response = await webClient.post<ApiResponse<void>>('/close_position', {
+    const payload: { symbol: string; exchange: string; product: string; strategy?: string } = {
       symbol,
       exchange,
       product,
-    })
+    }
+    if (strategy) {
+      payload.strategy = strategy
+    }
+    const response = await webClient.post<ApiResponse<void>>('/close_position', payload)
     return response.data
   },
 

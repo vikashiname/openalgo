@@ -194,7 +194,7 @@ describe('Positions with Strategy Attribution (Phase 3)', () => {
 
     // Verify both APIs were called
     expect(mockGetPositions).toHaveBeenCalledWith('test-api-key')
-    expect(mockGetAttributedPositions).toHaveBeenCalledWith('test-api-key', undefined, true)
+    expect(mockGetAttributedPositions).toHaveBeenCalledWith('test-api-key', undefined, false)
 
     // Verify reconciliation badges on contract row
     expect(screen.getByText('✓ RECONCILED')).toBeInTheDocument()

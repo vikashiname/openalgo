@@ -1368,6 +1368,7 @@ def test_2_full_target_exit():
     assert c["quantity"] == 100.0
     assert c["realized_pnl"] == 2000.0
     assert c["status"] == "CLOSED"
+    assert c["exit_reason"] == "TARGET"
 
 
 def test_3_full_sl_exit():
@@ -1413,6 +1414,7 @@ def test_3_full_sl_exit():
     assert c["strategy"] == "Macdfno"
     assert c["quantity"] == 100.0
     assert c["realized_pnl"] == -1000.0
+    assert c["exit_reason"] == "SL"
 
 
 def test_4_ui_manual_exit():
@@ -1457,6 +1459,7 @@ def test_4_ui_manual_exit():
     assert c["strategy"] == "Macdfno"
     assert c["quantity"] == 100.0
     assert c["realized_pnl"] == 500.0
+    assert c["exit_reason"] == "UI"
 
 
 def test_5_external_manual_broker_exit():
@@ -1799,6 +1802,103 @@ def test_15_ui_exit_position():
     assert normalize_strategy_name("Manual / Unattributed") is None
     assert normalize_strategy_name("target_exit") is None
     assert normalize_strategy_name("sl_exit") is None
+
+
+def test_16_target_exit_reason_and_pnl():
+    """16. Target exit: exit_reason = TARGET and realized P&L correct."""
+    trades = [
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 500.0,
+            "price": 140.0,
+            "strategy": "Emacrossopen",
+            "trade_time": "2026-09-20 09:30:00",
+        },
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 500.0,
+            "price": 145.0,
+            "strategy": "target_exit",
+            "trade_time": "2026-09-20 10:15:00",
+        },
+    ]
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    assert closed[0]["strategy"] == "Emacrossopen"
+    assert closed[0]["quantity"] == 500.0
+    assert closed[0]["realized_pnl"] == 2500.0  # (145 - 140) * 500
+    assert closed[0]["exit_reason"] == "TARGET"
+
+
+def test_17_sl_exit_reason_and_pnl():
+    """17. SL exit: exit_reason = SL and realized P&L correct."""
+    trades = [
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 500.0,
+            "price": 140.0,
+            "strategy": "Macdfno",
+            "trade_time": "2026-09-20 09:30:00",
+        },
+        {
+            "symbol": "TATASTEEL",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 500.0,
+            "price": 137.0,
+            "strategy": "sl_exit",
+            "trade_time": "2026-09-20 09:45:00",
+        },
+    ]
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    assert closed[0]["strategy"] == "Macdfno"
+    assert closed[0]["quantity"] == 500.0
+    assert closed[0]["realized_pnl"] == -1500.0  # (137 - 140) * 500
+    assert closed[0]["exit_reason"] == "SL"
+
+
+def test_18_manual_ui_exit_reason_and_strategy_preserved():
+    """18. Manual/UI exit: exit_reason = UI/MANUAL and original strategy preserved."""
+    trades = [
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "BUY",
+            "quantity": 250.0,
+            "price": 2500.0,
+            "strategy": "Emacrossopen",
+            "trade_time": "2026-09-20 11:00:00",
+        },
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "product": "MIS",
+            "action": "SELL",
+            "quantity": 250.0,
+            "price": 2520.0,
+            "strategy": "UI Exit Position",
+            "trade_time": "2026-09-20 11:30:00",
+        },
+    ]
+    closed = derive_closed_positions(trades)
+    assert len(closed) == 1
+    assert closed[0]["strategy"] == "Emacrossopen"
+    assert closed[0]["quantity"] == 250.0
+    assert closed[0]["realized_pnl"] == 5000.0  # (2520 - 2500) * 250
+    assert closed[0]["exit_reason"] == "UI"
+
 
 
 

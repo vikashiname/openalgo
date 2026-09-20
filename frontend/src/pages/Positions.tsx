@@ -310,7 +310,7 @@ export default function Positions() {
         const [posResp, attrResp] = await Promise.allSettled([
           withTimeout(tradingApi.getPositions(apiKey), 10000, 'Position book request timed out'),
           withTimeout(
-            tradingApi.getAttributedPositions(apiKey, undefined, true),
+            tradingApi.getAttributedPositions(apiKey, undefined, false),
             10000,
             'Attributed positions request timed out'
           ),

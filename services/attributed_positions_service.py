@@ -72,6 +72,8 @@ def _extract_exit_reason(fill: Dict[str, Any]) -> str:
         return "SL"
     if "ui" in raw_strat:
         return "UI"
+    if "manual" in raw_strat or "unattributed" in raw_strat:
+        return "MANUAL"
     if "square" in raw_strat:
         return "SQUAREOFF"
 
@@ -88,6 +90,8 @@ def _extract_exit_reason(fill: Dict[str, Any]) -> str:
                     return "SL"
                 if "ui" in tag_strat:
                     return "UI"
+                if "manual" in tag_strat or "unattributed" in tag_strat:
+                    return "MANUAL"
         except Exception:
             pass
 
