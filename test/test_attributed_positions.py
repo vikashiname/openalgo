@@ -1900,5 +1900,57 @@ def test_18_manual_ui_exit_reason_and_strategy_preserved():
     assert closed[0]["exit_reason"] == "UI"
 
 
+def test_carry_forward_closed_positions_reconciliation():
+    """Test carry-forward overnight positions closed today appear in closed_positions."""
+    from services.attributed_positions_service import reconcile_positions
 
+    broker_positions = [
+        {
+            "symbol": "MOTILALOFS27OCT26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0,
+            "average_price": 0.0,
+            "today_realized_pnl": 24202.5,
+            "realized_pnl": 24202.5,
+        }
+    ]
+    strategy_legs = [
+        {
+            "symbol": "MOTILALOFS27OCT26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "quantity": 0,
+            "average_price": 1030.0,
+            "strategy": "Macdfno",
+        }
+    ]
+    trades = [
+        {
+            "symbol": "MOTILALOFS27OCT26FUT",
+            "exchange": "NFO",
+            "product": "NRML",
+            "action": "SELL",
+            "quantity": 350,
+            "price": 1099.15,
+            "strategy": "Emacrossopen",
+            "trade_time": "2026-10-06 10:15:00",
+        }
+    ]
 
+    res = reconcile_positions(
+        broker_positions=broker_positions,
+        strategy_legs=strategy_legs,
+        closed_positions=[],
+        trades=trades,
+    )
+
+    assert "closed_positions" in res
+    assert len(res["closed_positions"]) == 1
+    cp = res["closed_positions"][0]
+    assert cp["symbol"] == "MOTILALOFS27OCT26FUT"
+    assert cp["strategy"] == "Macdfno"
+    assert cp["quantity"] == 350
+    assert cp["realized_pnl"] == 24202.5
+    assert cp["exit_average"] == 1099.15
+    assert "CLOSED" in cp["status"]

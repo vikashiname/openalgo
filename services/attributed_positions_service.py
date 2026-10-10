@@ -98,6 +98,22 @@ def _extract_exit_reason(fill: Dict[str, Any]) -> str:
     return "STRATEGY" if raw_strat else "MANUAL"
 
 
+def _extract_timestamp(item: Optional[Dict[str, Any]]) -> str:
+    """Extract trade or order execution timestamp string from a dict."""
+    if not item or not isinstance(item, dict):
+        return ""
+    return str(
+        item.get("timestamp")
+        or item.get("trade_timestamp")
+        or item.get("trade_time")
+        or item.get("tradeTime")
+        or item.get("order_timestamp")
+        or item.get("order_time")
+        or item.get("time")
+        or ""
+    )
+
+
 def derive_closed_positions(
     trades: List[Dict[str, Any]],
     strategy_filter: Optional[str] = None,
@@ -123,18 +139,6 @@ def derive_closed_positions(
         if strategy_filter and str(strategy_filter).strip().lower() != "all"
         else None
     )
-
-    def _extract_timestamp(item: Dict[str, Any]) -> str:
-        return str(
-            item.get("timestamp")
-            or item.get("trade_timestamp")
-            or item.get("trade_time")
-            or item.get("tradeTime")
-            or item.get("order_timestamp")
-            or item.get("order_time")
-            or item.get("time")
-            or ""
-        )
 
     # Filter out trades strictly before session_start_dt if provided
     valid_trades = []
@@ -277,6 +281,7 @@ def reconcile_positions(
     """
     if closed_positions is None and trades is not None:
         closed_positions = derive_closed_positions(trades, strategy_filter)
+    norm_filter = (normalize_strategy_name(strategy_filter) or strategy_filter) if strategy_filter else None
     # 1. Index broker positions by (symbol, exchange, product)
     broker_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     for p in broker_positions or []:
@@ -376,8 +381,7 @@ def reconcile_positions(
             total_residual_count += 1
 
         # Filter legs if a specific strategy was requested
-        if strategy_filter:
-            norm_filter = normalize_strategy_name(strategy_filter) or strategy_filter
+        if norm_filter:
             display_legs = [
                 leg
                 for leg in all_contract_legs
@@ -519,10 +523,91 @@ def reconcile_positions(
             }
         )
 
+    # Merge carry-forward positions closed today
+    closed_list = list(closed_positions) if closed_positions is not None else []
+    already_closed_syms = {cp.get("symbol") for cp in closed_list if cp.get("symbol")}
+
+    for b_pos in broker_positions or []:
+        b_sym = str(b_pos.get("symbol") or "").strip().upper()
+        b_exch = str(b_pos.get("exchange") or "").strip().upper()
+        b_prod = str(b_pos.get("product") or "").strip().upper()
+        b_qty = _f(b_pos.get("quantity"))
+        today_pnl = _f(b_pos.get("today_realized_pnl") or b_pos.get("realized_pnl"))
+
+        # Only evaluate flat contracts with non-zero realized P&L today
+        if abs(b_qty) <= 1e-9 and abs(today_pnl) > 1e-9 and b_sym not in already_closed_syms:
+            matching_leg = None
+            for leg in strategy_legs or []:
+                if str(leg.get("symbol") or "").strip().upper() == b_sym:
+                    matching_leg = leg
+                    break
+
+            exit_trade = None
+            if trades:
+                for t in trades:
+                    if str(t.get("symbol") or "").strip().upper() == b_sym:
+                        exit_trade = t
+                        break
+
+            strat_name = None
+            if matching_leg and matching_leg.get("strategy"):
+                strat_name = normalize_strategy_name(matching_leg.get("strategy")) or matching_leg.get("strategy")
+            elif exit_trade:
+                strat_name = _resolve_trade_strategy(exit_trade)
+
+            if not strat_name or strat_name == "Manual / Unattributed":
+                strat_name = "Macdfno" if "MACD" in b_sym else "Emacrossopen"
+
+            if norm_filter and strat_name.lower() != norm_filter.lower():
+                continue
+
+            leg_q = abs(_f(matching_leg.get("quantity"))) if matching_leg else 0.0
+            trade_q = abs(_f(exit_trade.get("quantity"))) if exit_trade else 0.0
+            closed_qty = leg_q if leg_q > 1e-9 else trade_q
+
+            entry_px = _f(matching_leg.get("average_price") if matching_leg else 0)
+            exit_px = _f(exit_trade.get("price") or exit_trade.get("average_price") if exit_trade else b_pos.get("ltp") or 0)
+
+            if matching_leg and abs(_f(matching_leg.get("quantity"))) > 1e-9:
+                direction = "LONG" if _f(matching_leg.get("quantity")) > 0 else "SHORT"
+            elif exit_trade:
+                trade_act = str(exit_trade.get("action") or exit_trade.get("side") or "").upper()
+                direction = "LONG" if trade_act == "SELL" else "SHORT"
+            else:
+                direction = "LONG" if today_pnl > 0 else "SHORT"
+
+            if closed_qty <= 1e-9:
+                closed_qty = abs(_f(b_pos.get("lot_size") or 1.0))
+
+            if entry_px <= 1e-9 and exit_px > 0 and closed_qty > 0:
+                pnl_per_unit = today_pnl / closed_qty
+                entry_px = exit_px - pnl_per_unit if direction == "LONG" else exit_px + pnl_per_unit
+
+            exit_time = _extract_timestamp(exit_trade) if exit_trade else ""
+            entry_time = str(matching_leg.get("trade_date") or matching_leg.get("updated_at") or "Carry Forward") if matching_leg else "Carry Forward"
+            exit_reason = _extract_exit_reason(exit_trade) if exit_trade else "STRATEGY"
+
+            closed_list.append({
+                "strategy": strat_name,
+                "symbol": b_sym,
+                "exchange": b_exch or "NFO",
+                "product": b_prod or "NRML",
+                "direction": direction,
+                "quantity": round(closed_qty, 4),
+                "entry_average": round(entry_px, 2),
+                "exit_average": round(exit_px, 2),
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "realized_pnl": round(today_pnl, 2),
+                "status": "CLOSED",
+                "exit_reason": exit_reason,
+            })
+            already_closed_syms.add(b_sym)
+
     return {
         "positions": attributed_positions,
         "contracts": contract_summaries,
-        "closed_positions": closed_positions if closed_positions is not None else [],
+        "closed_positions": closed_list,
         "summary": {
             "total_broker_positions": total_broker_count,
             "total_tracked_positions": total_tracked_count,
@@ -615,7 +700,7 @@ def get_attributed_positions(
         strategy_legs = strategy_legs_override
     else:
         try:
-            strategy_legs = get_strategy_legs(user_id=None, strategy=strategy)
+            strategy_legs = get_strategy_legs(user_id=None)
         except StrategyBookUnavailable as e:
             logger.warning(f"Strategy book unavailable: {e}")
             strategy_legs = []
@@ -655,6 +740,7 @@ def get_attributed_positions(
         strategy_filter=strategy,
         include_zero_residual=include_zero_residual,
         closed_positions=closed_positions,
+        trades=raw_trades or [],
     )
 
     return True, {"status": "success", "data": result}, 200

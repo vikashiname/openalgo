@@ -36,6 +36,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { MasterContractStatus, PythonStrategy } from '@/types/python-strategy'
@@ -45,6 +52,7 @@ import { showToast } from '@/utils/toast'
 export default function PythonStrategyIndex() {
   const navigate = useNavigate()
   const [strategies, setStrategies] = useState<PythonStrategy[]>([])
+  const [selectedStrategy, setSelectedStrategy] = useState<string>('all')
   const [masterStatus, setMasterStatus] = useState<MasterContractStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -165,6 +173,9 @@ export default function PythonStrategyIndex() {
       if (response.status === 'success') {
         showToast.success('Strategy deleted', 'pythonStrategy')
         setStrategies(strategies.filter((s) => s.id !== strategyToDelete.id))
+        if (selectedStrategy === strategyToDelete.id) {
+          setSelectedStrategy('all')
+        }
       } else {
         showToast.error(response.message || 'Failed to delete strategy', 'pythonStrategy')
       }
@@ -237,6 +248,12 @@ export default function PythonStrategyIndex() {
     running: strategies.filter((s) => s.status === 'running').length,
     scheduled: strategies.filter((s) => s.is_scheduled).length,
   }
+
+  // Filtered strategies based on selectedStrategy
+  const filteredStrategies =
+    selectedStrategy === 'all'
+      ? strategies
+      : strategies.filter((s) => s.id === selectedStrategy)
 
   if (loading) {
     return (
@@ -342,10 +359,29 @@ export default function PythonStrategyIndex() {
         </Card>
       </div>
 
-      {/* Current Time */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Clock className="h-4 w-4" />
-        Current IST: {currentTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+      {/* Controls Bar: Current Time & Strategy Filter */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Clock className="h-4 w-4" />
+          Current IST: {currentTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
+        </div>
+        {strategies.length > 0 && (
+          <div className="w-full sm:w-[200px]">
+            <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+              <SelectTrigger size="sm" className="h-9 text-xs">
+                <SelectValue placeholder="All Strategies" />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem value="all">All Strategies</SelectItem>
+                {strategies.map((strategy) => (
+                  <SelectItem key={strategy.id} value={strategy.id}>
+                    {strategy.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Strategies Grid */}
@@ -363,9 +399,22 @@ export default function PythonStrategyIndex() {
             </Button>
           </CardContent>
         </Card>
+      ) : filteredStrategies.length === 0 ? (
+        <Card className="py-12">
+          <CardContent className="flex flex-col items-center justify-center text-center">
+            <FileCode className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Strategies Found</h3>
+            <p className="text-muted-foreground mb-4">
+              No strategy matches the selected filter.
+            </p>
+            <Button variant="outline" onClick={() => setSelectedStrategy('all')}>
+              Show All Strategies
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 items-start">
-          {strategies.map((strategy) => (
+          {filteredStrategies.map((strategy) => (
             <Card key={strategy.id} className="relative overflow-hidden flex flex-col">
               {/* Status bar */}
               <div

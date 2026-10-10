@@ -15,6 +15,16 @@ logger = get_logger(__name__)
 
 def _send_alert(api_type, order_data, response_data, api_key):
     """Wrapper that matches the original dispatch pattern."""
+    if isinstance(order_data, dict):
+        strat = str(order_data.get("strategy", "")).strip().upper()
+        if (
+            order_data.get("disable_telegram")
+            or order_data.get("skip_telegram")
+            or order_data.get("notify") is False
+            or strat in ["MACDFNO", "EMACROSSOPEN", "OIFNO", "MACD_FNO_V1", "EMACROSSOPEN_V1", "NIFTY_COVERED_CALL"]
+        ):
+            logger.debug(f"Skipping generic Telegram alert for strategy order: {strat}")
+            return
     telegram_alert_service.send_order_alert(
         api_type,
         order_data,

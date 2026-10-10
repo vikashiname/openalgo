@@ -1817,8 +1817,13 @@ def import_from_parquet(
         Tuple of (success, message, records_imported)
     """
     try:
-        # Read Parquet file
-        df = pd.read_parquet(file_path)
+        # Read Parquet file with memory safety
+        try:
+            import pyarrow.parquet as pq
+            table = pq.read_table(file_path)
+            df = table.to_pandas(self_destruct=True, split_blocks=True)
+        except Exception:
+            df = pd.read_parquet(file_path)
 
         if df.empty:
             return False, "Parquet file is empty", 0

@@ -37,6 +37,7 @@ need → drill into the specific file. Don't load everything at once.
 | Optional gthread web server: fresh installs, switching on Ubuntu and Docker, verification and rollback | [gthread/README.md](gthread/README.md) |
 | Upgrade / SMTP / TOTP / forgot-password | https://docs.openalgo.in/installation-guidelines/getting-started/ |
 | Broker integration (36 plugins) | [broker-integration-guide.md](broker-integration-guide.md) |
+| Strategy credentials isolation & deployment SOP | [SOP_STRATEGY_SECURITY_AND_DEPLOYMENT.md](SOP_STRATEGY_SECURITY_AND_DEPLOYMENT.md) · [AUTORESEARCH_TESTING_CRITERIA.md](AUTORESEARCH_TESTING_CRITERIA.md) |
 | Release notes & changelog | [releases/](releases/) · [CHANGELOG.md](CHANGELOG.md) |
 
 ## Feature surfaces

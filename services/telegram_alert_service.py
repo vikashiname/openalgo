@@ -41,16 +41,16 @@ class TelegramAlertService:
     def __init__(self):
         self.enabled = True
         self.alert_templates = {
-            "placeorder": "*Order Placed*\n{details}",
-            "placesmartorder": "*Smart Order Placed*\n{details}",
-            "basketorder": "*Basket Order Executed*\n{details}",
-            "splitorder": "*Split Order Executed*\n{details}",
-            "optionsorder": "*Options Order Executed*\n{details}",
-            "optionsmultiorder": "*Options Multi-Order Executed*\n{details}",
-            "modifyorder": "*Order Modified*\n{details}",
-            "cancelorder": "*Order Cancelled*\n{details}",
-            "cancelallorder": "*All Orders Cancelled*\n{details}",
-            "closeposition": "*Position Closed*\n{details}",
+            "placeorder": "🟢 *Order Placed*\n\n{details}",
+            "placesmartorder": "⚡ *Smart Order Placed*\n\n{details}",
+            "basketorder": "📦 *Basket Order Executed*\n\n{details}",
+            "splitorder": "✂️ *Split Order Executed*\n\n{details}",
+            "optionsorder": "🎯 *Options Order Executed*\n\n{details}",
+            "optionsmultiorder": "📊 *Options Multi-Order Executed*\n\n{details}",
+            "modifyorder": "✏️ *Order Modified*\n\n{details}",
+            "cancelorder": "❌ *Order Cancelled*\n\n{details}",
+            "cancelallorder": "🚫 *All Orders Cancelled*\n\n{details}",
+            "closeposition": "🏁 *Position Closed*\n\n{details}",
         }
 
     def format_order_details(
@@ -61,43 +61,128 @@ class TelegramAlertService:
             details = []
             timestamp = datetime.now().strftime("%H:%M:%S")
 
+            # Strategy Name if available
+            strategy = order_data.get("strategy")
+            if strategy:
+                details.append(f"*Strategy:* {strategy}")
+
             # Add mode indicator at the top
             mode = response.get("mode", "live")
             if mode == "analyze":
-                details.append("*ANALYZE MODE - No Real Order*")
+                details.append("🔬 *ANALYZE MODE - No Real Order*")
                 details.append("─────────────────────")
             else:
-                details.append("*LIVE MODE - Real Order*")
+                details.append("⚡ *LIVE MODE - Real Order*")
                 details.append("─────────────────────")
 
             if order_type == "placeorder":
+                action = order_data.get("action", "N/A")
+                direction = order_data.get("direction")
+                symbol = order_data.get("symbol", "N/A")
+                details.append(f"*Symbol:* `{symbol}`")
+                details.append(f"*Action:* *{action}*")
+                if direction:
+                    details.append(f"*Direction:* *{direction}*")
+                details.append(f"*Quantity:* {order_data.get('quantity', 'N/A')}")
+
+                price = order_data.get("price") or order_data.get("entry_price") or response.get("average_price") or response.get("price")
+                try:
+                    if price and float(price) > 0:
+                        details.append(f"*Price:* ₹{float(price):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                target = order_data.get("target") or order_data.get("target_price") or order_data.get("tp")
+                try:
+                    if target and float(target) > 0:
+                        details.append(f"🎯 *Target:* ₹{float(target):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                stoploss = order_data.get("stoploss") or order_data.get("stoploss_price") or order_data.get("sl")
+                try:
+                    if stoploss and float(stoploss) > 0:
+                        details.append(f"🛑 *Stop Loss:* ₹{float(stoploss):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                trigger_px = order_data.get("trigger_price") or order_data.get("triggerprice")
+                try:
+                    if trigger_px and float(trigger_px) > 0:
+                        details.append(f"*Trigger Price:* ₹{float(trigger_px):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
                 details.extend(
                     [
-                        f"Symbol: `{order_data.get('symbol', 'N/A')}`",
-                        f"Action: {order_data.get('action', 'N/A')}",
-                        f"Quantity: {order_data.get('quantity', 'N/A')}",
-                        f"Price Type: {order_data.get('pricetype', 'N/A')}",
-                        f"Exchange: {order_data.get('exchange', 'N/A')}",
-                        f"Product: {order_data.get('product', 'N/A')}",
+                        f"*Price Type:* {order_data.get('pricetype', 'N/A')}",
+                        f"*Exchange:* {order_data.get('exchange', 'N/A')}",
+                        f"*Product:* {order_data.get('product', 'N/A')}",
                     ]
                 )
                 if response.get("status") == "success":
-                    details.append(f"Order ID: `{response.get('orderid', 'N/A')}`")
+                    details.append(f"*Order ID:* `{response.get('orderid', 'N/A')}`")
+                    order_status = response.get("order_status") or response.get("orderstatus") or ("FILLED" if mode == "analyze" else "SUBMITTED")
+                    details.append(f"*Order Status:* {order_status}")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
+
+                if "pos_before" in order_data and "pos_after" in order_data:
+                    details.append(f"*Position:* {order_data['pos_before']} ➔ {order_data['pos_after']}")
 
             elif order_type == "placesmartorder":
+                action = order_data.get("action", "N/A")
+                direction = order_data.get("direction")
+                symbol = order_data.get("symbol", "N/A")
+                details.append(f"*Symbol:* `{symbol}`")
+                details.append(f"*Action:* *{action}*")
+                if direction:
+                    details.append(f"*Direction:* *{direction}*")
+                details.append(f"*Quantity:* {order_data.get('quantity', 'N/A')}")
+                if order_data.get("position_size") is not None:
+                    details.append(f"*Position Size:* {order_data.get('position_size')}")
+
+                price = order_data.get("price") or order_data.get("entry_price") or response.get("average_price") or response.get("price")
+                try:
+                    if price and float(price) > 0:
+                        details.append(f"*Price:* ₹{float(price):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                target = order_data.get("target") or order_data.get("target_price") or order_data.get("tp")
+                try:
+                    if target and float(target) > 0:
+                        details.append(f"🎯 *Target:* ₹{float(target):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                stoploss = order_data.get("stoploss") or order_data.get("stoploss_price") or order_data.get("sl")
+                try:
+                    if stoploss and float(stoploss) > 0:
+                        details.append(f"🛑 *Stop Loss:* ₹{float(stoploss):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
+                trigger_px = order_data.get("trigger_price") or order_data.get("triggerprice")
+                try:
+                    if trigger_px and float(trigger_px) > 0:
+                        details.append(f"*Trigger Price:* ₹{float(trigger_px):.2f}")
+                except (ValueError, TypeError):
+                    pass
+
                 details.extend(
                     [
-                        f"Symbol: `{order_data.get('symbol', 'N/A')}`",
-                        f"Action: {order_data.get('action', 'N/A')}",
-                        f"Quantity: {order_data.get('quantity', 'N/A')}",
-                        f"Position Size: {order_data.get('position_size', 'N/A')}",
-                        f"Exchange: {order_data.get('exchange', 'N/A')}",
+                        f"*Price Type:* {order_data.get('pricetype', 'MARKET')}",
+                        f"*Exchange:* {order_data.get('exchange', 'N/A')}",
+                        f"*Product:* {order_data.get('product', 'NRML')}",
                     ]
                 )
                 if response.get("status") == "success":
-                    details.append(f"Order ID: `{response.get('orderid', 'N/A')}`")
+                    details.append(f"*Order ID:* `{response.get('orderid', 'N/A')}`")
+                    order_status = response.get("order_status") or response.get("orderstatus") or ("FILLED" if mode == "analyze" else "SUBMITTED")
+                    details.append(f"*Order Status:* {order_status}")
+                else:
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
             elif order_type == "basketorder":
                 if response.get("status") == "success":
@@ -121,7 +206,7 @@ class TelegramAlertService:
                         details.append(f"... and {len(results) - 3} more")
 
             elif order_type == "splitorder":
-                details.append(f"Symbol: `{order_data.get('symbol', 'N/A')}`")
+                details.append(f"*Symbol:* `{order_data.get('symbol', 'N/A')}`")
                 results = response.get("results", [])
                 success_count = len([r for r in results if r.get("status") == "success"])
                 failed_count = len([r for r in results if r.get("status") != "success"])
@@ -146,23 +231,23 @@ class TelegramAlertService:
             elif order_type == "modifyorder":
                 details.extend(
                     [
-                        f"Order ID: `{order_data.get('orderid', 'N/A')}`",
-                        f"Symbol: `{order_data.get('symbol', 'N/A')}`",
-                        f"New Quantity: {order_data.get('quantity', 'N/A')}",
-                        f"New Price: {order_data.get('price', 'N/A')}",
+                        f"*Order ID:* `{order_data.get('orderid', 'N/A')}`",
+                        f"*Symbol:* `{order_data.get('symbol', 'N/A')}`",
+                        f"*New Quantity:* {order_data.get('quantity', 'N/A')}",
+                        f"*New Price:* {order_data.get('price', 'N/A')}",
                     ]
                 )
                 if response.get("status") == "success":
                     details.append("Modification Successful")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
             elif order_type == "cancelorder":
-                details.extend([f"Order ID: `{order_data.get('orderid', 'N/A')}`"])
+                details.extend([f"*Order ID:* `{order_data.get('orderid', 'N/A')}`"])
                 if response.get("status") == "success":
                     details.append("Cancellation Successful")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
             elif order_type == "cancelallorder":
                 if response.get("status") == "success":
@@ -181,12 +266,21 @@ class TelegramAlertService:
                 if response.get("status") == "success":
                     # Individual position close includes symbol details
                     if order_data.get("symbol"):
+                        symbol = order_data.get("symbol", "N/A")
+                        details.append(f"*Symbol:* `{symbol}`")
+                        if order_data.get("action"):
+                            details.append(f"*Action:* *{order_data.get('action')}*")
+                        if order_data.get("quantity"):
+                            details.append(f"*Quantity:* {order_data.get('quantity')}")
+                        if order_data.get("exit_reason") or order_data.get("reason"):
+                            details.append(f"*Exit Reason:* {order_data.get('exit_reason') or order_data.get('reason')}")
+                        if order_data.get("pnl") is not None:
+                            details.append(f"*Net P&L:* {order_data.get('pnl')}")
                         details.extend(
                             [
-                                f"Symbol: `{order_data.get('symbol', 'N/A')}`",
-                                f"Exchange: {order_data.get('exchange', 'N/A')}",
-                                f"Product: {order_data.get('product', 'N/A')}",
-                                f"Order ID: `{response.get('orderid', 'N/A')}`",
+                                f"*Exchange:* {order_data.get('exchange', 'N/A')}",
+                                f"*Product:* {order_data.get('product', 'N/A')}",
+                                f"*Order ID:* `{response.get('orderid', 'N/A')}`",
                             ]
                         )
                     else:
@@ -202,10 +296,10 @@ class TelegramAlertService:
                         else:
                             details.append("All positions closed successfully")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
             elif order_type == "optionsorder":
-                details.append(f"Underlying: `{order_data.get('underlying', 'N/A')}`")
+                details.append(f"*Underlying:* `{order_data.get('underlying', 'N/A')}`")
                 if response.get("status") == "success":
                     results = response.get("results", [])
                     success_count = len([r for r in results if r.get("status") == "success"])
@@ -227,17 +321,17 @@ class TelegramAlertService:
                         # Single order (non-split)
                         details.extend(
                             [
-                                f"Symbol: `{response.get('symbol', order_data.get('symbol', 'N/A'))}`",
-                                f"Action: {order_data.get('action', 'N/A')}",
-                                f"Quantity: {order_data.get('quantity', 'N/A')}",
-                                f"Order ID: `{response.get('orderid', 'N/A')}`",
+                                f"*Symbol:* `{response.get('symbol', order_data.get('symbol', 'N/A'))}`",
+                                f"*Action:* {order_data.get('action', 'N/A')}",
+                                f"*Quantity:* {order_data.get('quantity', 'N/A')}",
+                                f"*Order ID:* `{response.get('orderid', 'N/A')}`",
                             ]
                         )
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
             elif order_type == "optionsmultiorder":
-                details.append(f"Underlying: `{order_data.get('underlying', 'N/A')}`")
+                details.append(f"*Underlying:* `{order_data.get('underlying', 'N/A')}`")
                 if response.get("status") == "success":
                     results = response.get("results", [])
                     success_count = len([r for r in results if r.get("status") == "success"])
@@ -258,13 +352,9 @@ class TelegramAlertService:
                     if response.get("underlying_ltp"):
                         details.append(f"Underlying LTP: {response.get('underlying_ltp')}")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    details.append(f"*Error:* {response.get('message', 'Failed')}")
 
-            details.append(f"Time: {timestamp}")
-
-            # Add strategy if available
-            if order_data.get("strategy"):
-                details.insert(0, f"Strategy: *{order_data.get('strategy')}*")
+            details.append(f"⏰ *Time:* {timestamp} IST")
 
             return "\n".join(details)
 
@@ -379,6 +469,17 @@ class TelegramAlertService:
                 logger.debug("Telegram alerts are disabled globally")
                 return
 
+            # Skip if order explicitly requests to disable generic telegram alert or if strategy has rich custom alerts
+            strat = str(order_data.get("strategy", "")).strip().upper()
+            if (
+                order_data.get("disable_telegram")
+                or order_data.get("skip_telegram")
+                or order_data.get("notify") is False
+                or strat in ["MACDFNO", "EMACROSSOPEN", "OIFNO", "MACD_FNO_V1", "EMACROSSOPEN_V1", "NIFTY_COVERED_CALL"]
+            ):
+                logger.debug(f"Skipping generic OpenAlgo telegram alert for strategy: {strat}")
+                return
+
             # Skip if the bot is stopped — stopping the bot must also stop
             # outbound order alerts (GitHub issue #1577).
             if not self.is_bot_active():
@@ -429,7 +530,15 @@ class TelegramAlertService:
             )
 
             # Format message
-            template = self.alert_templates.get(order_type, "*Order Update*\n{details}")
+            template = self.alert_templates.get(order_type, "*Order Update*\n\n{details}")
+            if order_type in ("placeorder", "placesmartorder"):
+                action = str(order_data.get("action", "")).upper()
+                direction = str(order_data.get("direction", "")).upper()
+                if action == "SELL" or direction == "SHORT":
+                    template = "🔴 *Order Placed*\n\n{details}" if order_type == "placeorder" else "🔴 *Smart Order Placed*\n\n{details}"
+                else:
+                    template = "🟢 *Order Placed*\n\n{details}" if order_type == "placeorder" else "🟢 *Smart Order Placed*\n\n{details}"
+
             details = self.format_order_details(order_type, order_data, response)
             message = template.format(details=details)
 

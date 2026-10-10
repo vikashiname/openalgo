@@ -795,9 +795,23 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
     except (TypeError, ValueError):
         entry_price_val = 0.0
 
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.00")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
+    sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
+
+    if entry_price_val > 0:
+        if direction == "LONG":
+            target_px = entry_price_val * (1.0 + target_pct / 100.0)
+            sl_px = entry_price_val * (1.0 - sl_pct / 100.0)
+        else:
+            target_px = entry_price_val * (1.0 - target_pct / 100.0)
+            sl_px = entry_price_val * (1.0 + sl_pct / 100.0)
+        target_sl_lines = f"<b>🎯 Target:</b> ₹{target_px:.2f} ({'+' if direction == 'LONG' else '-'}{target_pct:.1f}%)\n<b>🛑 Stop Loss:</b> ₹{sl_px:.2f} ({'-' if direction == 'LONG' else '+'}{sl_pct:.1f}%)\n"
+    else:
+        target_sl_lines = ""
+
     # For MARKET orders: strictly display Entry Price and NEVER display Trigger Price: 0.0
     if price_type == "MARKET":
-        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n"
+        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n{target_sl_lines}"
     else:
         trigger_px = data.get("trigger_price")
         try:
@@ -805,9 +819,9 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
         except (TypeError, ValueError):
             trigger_px_val = 0.0
         if trigger_px_val > 0:
-            price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n<b>Trigger Price:</b> ₹{trigger_px_val:.2f}\n"
+            price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n<b>Trigger Price:</b> ₹{trigger_px_val:.2f}\n{target_sl_lines}"
         else:
-            price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n"
+            price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n{target_sl_lines}"
 
     return (
         f"{dir_emoji} <b>PAPER TRADE — ORDER PLACED</b>\n\n"
@@ -843,7 +857,7 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
 def format_paper_exit_alert(data: Dict[str, Any]) -> str:
     """
     Formats an HTML Telegram alert message for paper trading position exits
-    (TARGET_HIT, CATASTROPHE_SL, V2-2_REVERSAL).
+    (TARGET_HIT, CATASTROPHE_SL, V2-2_REVERSAL, SIGNAL_EXIT).
     """
     strategy_name = data.get("strategy_name", STRATEGY_NAME)
     contract = data.get("contract", "N/A")
@@ -869,8 +883,27 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
         pnl_pct = 0.0
         pnl_abs = 0.0
 
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.00")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
+    sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
+
+    if entry_price > 0:
+        if direction == "LONG":
+            target_px = entry_price * (1.0 + target_pct / 100.0)
+            sl_px = entry_price * (1.0 - sl_pct / 100.0)
+        else:
+            target_px = entry_price * (1.0 - target_pct / 100.0)
+            sl_px = entry_price * (1.0 + sl_pct / 100.0)
+        target_sl_lines = f"<b>🎯 Target:</b> ₹{target_px:.2f} ({'+' if direction == 'LONG' else '-'}{target_pct:.1f}%)\n<b>🛑 Stop Loss:</b> ₹{sl_px:.2f} ({'-' if direction == 'LONG' else '+'}{sl_pct:.1f}%)\n"
+    else:
+        target_sl_lines = ""
+
     pnl_emoji = "🟢" if pnl_abs > 0 else ("🔴" if pnl_abs < 0 else "⚪")
-    pnl_sign = "+" if pnl_abs > 0 else ""
+    if pnl_abs > 0:
+        pnl_str = f"+₹{pnl_abs:,.2f} (+{pnl_pct:.2f}%)"
+    elif pnl_abs < 0:
+        pnl_str = f"-₹{abs(pnl_abs):,.2f} ({pnl_pct:.2f}%)"
+    else:
+        pnl_str = f"₹0.00 (0.00%)"
 
     if exit_reason == "TARGET_HIT":
         reason_header = "🎯 TARGET HIT"
@@ -881,6 +914,9 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
     elif exit_reason == "V2-2_REVERSAL":
         reason_header = "🔄 REVERSAL EXIT"
         reason_badge = "🔄 <b>OPPOSITE V2-2 SIGNAL REVERSAL</b>"
+    elif exit_reason == "SIGNAL_EXIT":
+        reason_header = "🔄 SIGNAL EXIT"
+        reason_badge = "🔄 <b>OPPOSITE SIGNAL EXIT (ENTRY BLOCKED)</b>"
     else:
         reason_header = f"EXIT ({exit_reason})"
         reason_badge = f"ℹ️ <b>{exit_reason}</b>"
@@ -897,7 +933,8 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
         f"<b>Quantity:</b> {qty}\n"
         f"<b>Entry Price:</b> ₹{entry_price:.2f}\n"
         f"<b>Exit Price:</b> ₹{exit_price:.2f}\n"
-        f"<b>Net P&L:</b> {pnl_sign}₹{pnl_abs:,.2f} ({pnl_sign}{pnl_pct:.2f}%)\n"
+        f"{target_sl_lines}"
+        f"<b>Net P&L:</b> {pnl_str}\n"
         f"<b>Exchange:</b> {EXCHANGE}\n"
         f"<b>Product:</b> {PRODUCT}\n"
         f"<b>Order ID:</b> <code>{order_id}</code>\n"
@@ -1931,6 +1968,11 @@ class EMACrossPaperTradingEngine:
         except Exception as e:
             logger.warning(f"Position query warning for {contract_symbol}: {e}")
 
+        # Fallback to locally tracked positions if server returns 0 / unreachable
+        tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_symbol, {})
+        if tracked:
+            return int(tracked.get("quantity", 0))
+
         return 0
 
     def get_all_open_positions(self) -> Dict[str, int]:
@@ -2587,17 +2629,27 @@ class EMACrossPaperTradingEngine:
                     return False, active_positions_count
             elif current_pos < 0:
                 # Controlled reversal or exit to flat
+                time_ok = True
+                if getattr(self, "enable_time_filter", False):
+                    time_ok, time_reason = is_entry_time_allowed()
+                regime_ok = True
+                if getattr(self, "enable_regime_filter", False):
+                    df_target = df_completed if df_completed is not None else sig_data.get("df_completed")
+                    regime_ok, _ = is_long_regime_allowed(symbol, df_target)
+                universe_ok = (not self.use_asymmetric_universe) or (symbol in TOP_LONGS)
+
                 action = "BUY"
-                if self.use_asymmetric_universe and symbol not in TOP_LONGS:
-                    exec_qty = abs(current_pos)
-                    logger.info(
-                        f"🔄 [ASYMMETRIC EXIT TO FLAT] {symbol} ({contract_sym}): Closing SHORT pos ({current_pos}) to FLAT (not in TOP_LONGS). Order Qty = {exec_qty}"
-                    )
-                else:
+                if time_ok and regime_ok and universe_ok:
                     exec_qty = abs(current_pos) + base_order_qty
                     is_reversal = True
                     logger.info(
                         f"🔄 [REVERSAL SHORT->LONG] {symbol} ({contract_sym}): Current Pos = {current_pos}, Order Qty = {exec_qty}"
+                    )
+                else:
+                    exec_qty = abs(current_pos)
+                    is_exit_to_flat = True
+                    logger.info(
+                        f"🔄 [EXIT TO FLAT] {symbol} ({contract_sym}): Closing SHORT pos ({current_pos}) to FLAT (opposite entry blocked). Order Qty = {exec_qty}"
                     )
             else:
                 logger.info(f"ℹ️ [DUPLICATE] Already in LONG position ({current_pos}) for {symbol}. No order placed.")
@@ -2625,17 +2677,23 @@ class EMACrossPaperTradingEngine:
                     return False, active_positions_count
             elif current_pos > 0:
                 # Controlled reversal or exit to flat
+                time_ok = True
+                if getattr(self, "enable_time_filter", False):
+                    time_ok, time_reason = is_entry_time_allowed()
+                universe_ok = (not self.use_asymmetric_universe) or (symbol in TOP_SHORTS)
+
                 action = "SELL"
-                if self.use_asymmetric_universe and symbol not in TOP_SHORTS:
-                    exec_qty = current_pos
-                    logger.info(
-                        f"🔄 [ASYMMETRIC EXIT TO FLAT] {symbol} ({contract_sym}): Closing LONG pos ({current_pos}) to FLAT (not in TOP_SHORTS). Order Qty = {exec_qty}"
-                    )
-                else:
+                if time_ok and universe_ok:
                     exec_qty = current_pos + base_order_qty
                     is_reversal = True
                     logger.info(
                         f"🔄 [REVERSAL LONG->SHORT] {symbol} ({contract_sym}): Current Pos = {current_pos}, Order Qty = {exec_qty}"
+                    )
+                else:
+                    exec_qty = current_pos
+                    is_exit_to_flat = True
+                    logger.info(
+                        f"🔄 [EXIT TO FLAT] {symbol} ({contract_sym}): Closing LONG pos ({current_pos}) to FLAT (opposite entry blocked). Order Qty = {exec_qty}"
                     )
             else:
                 logger.info(f"ℹ️ [DUPLICATE] Already in SHORT position ({current_pos}) for {symbol}. No order placed.")
@@ -2657,7 +2715,6 @@ class EMACrossPaperTradingEngine:
         if resp:
             order_id = resp.get("orderid", "PAPER_" + str(int(time.time())))
             order_status = "FILLED"
-            new_pos = (base_order_qty if action == "BUY" else -base_order_qty)
 
             # Retrieve actual broker/OpenAlgo market fill price
             candle_close = float(sig_data.get("close", 0.0))
@@ -2681,8 +2738,42 @@ class EMACrossPaperTradingEngine:
                 order_id=str(order_id),
             )
 
-            # If this order was a controlled reversal, dispatch exit alert for the closed prior position
-            if is_reversal and current_pos != 0:
+            if is_exit_to_flat:
+                # 1. Dispatch rich exit notification for closed position
+                prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
+                prior_entry_price = float(prior_tracked.get("average_price", 0.0) or candle_close)
+                prior_direction = prior_tracked.get("direction", "LONG" if current_pos > 0 else "SHORT")
+                exit_payload = {
+                    "strategy_name": STRATEGY_NAME,
+                    "contract": contract_sym,
+                    "symbol": symbol,
+                    "direction": prior_direction,
+                    "action": action,
+                    "exit_reason": "SIGNAL_EXIT",
+                    "quantity": exec_qty,
+                    "entry_price": prior_entry_price,
+                    "exit_price": fill_price,
+                    "order_id": str(order_id),
+                    "order_status": order_status,
+                    "candle_time_str": candle_time,
+                    "candle_time": candle_iso,
+                    "execution_time": get_current_ist().strftime("%H:%M:%S"),
+                }
+                alert_key = f"ORDER_ALERT_{order_id}"
+                if not self.state_manager.is_alert_sent(alert_key):
+                    exit_msg = format_paper_exit_alert(exit_payload)
+                    send_telegram_alert(exit_msg)
+                    self.state_manager.record_alert_sent(alert_key)
+
+                # 2. Clear tracked position
+                tracked = self.state_manager.state.get("tracked_positions", {})
+                tracked.pop(contract_sym, None)
+                self.state_manager.update_tracked_positions(tracked)
+                return True, max(0, active_positions_count - 1)
+
+            elif is_reversal and current_pos != 0:
+                new_pos = base_order_qty if action == "BUY" else -base_order_qty
+                # 1. Exit alert for prior position
                 prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
                 prior_entry_price = float(prior_tracked.get("average_price", 0.0) or candle_close)
                 prior_direction = prior_tracked.get("direction", "LONG" if current_pos > 0 else "SHORT")
@@ -2709,44 +2800,82 @@ class EMACrossPaperTradingEngine:
                     send_telegram_alert(rev_exit_msg)
                     self.state_manager.record_alert_sent(rev_alert_key)
 
-            # Update tracked positions with actual fill price
-            tracked = self.state_manager.state.get("tracked_positions", {})
-            tracked[contract_sym] = {
-                "contract": contract_sym,
-                "base_symbol": symbol,
-                "direction": "LONG" if new_pos > 0 else "SHORT",
-                "quantity": new_pos,
-                "average_price": fill_price,
-                "candle_time": candle_time,
-                "last_order_id": order_id,
-            }
-            self.state_manager.update_tracked_positions(tracked)
+                # 2. Update tracked position with new opposite position
+                tracked = self.state_manager.state.get("tracked_positions", {})
+                tracked[contract_sym] = {
+                    "contract": contract_sym,
+                    "base_symbol": symbol,
+                    "direction": "LONG" if new_pos > 0 else "SHORT",
+                    "quantity": new_pos,
+                    "average_price": fill_price,
+                    "candle_time": candle_time,
+                    "last_order_id": order_id,
+                }
+                self.state_manager.update_tracked_positions(tracked)
 
-            # Telegram Paper Execution Notification (Unified 1-Part Alert with Order-ID Deduplication)
-            alert_payload = {
-                **sig_data,
-                "strategy_name": STRATEGY_NAME,
-                "contract": contract_sym,
-                "direction": "LONG" if sig == "BUY" else "SHORT",
-                "pos_before": current_pos,
-                "pos_after": new_pos,
-                "action": action,
-                "quantity": exec_qty,
-                "entry_price": fill_price,
-                "price_type": "MARKET",
-                "exchange": EXCHANGE,
-                "product": PRODUCT,
-                "order_id": order_id,
-                "order_status": order_status,
-                "execution_time": get_current_ist().strftime("%H:%M:%S"),
-            }
-            alert_key = f"ORDER_ALERT_{order_id}"
-            if not self.state_manager.is_alert_sent(alert_key):
-                trade_alert_msg = format_paper_trade_alert(alert_payload)
-                send_telegram_alert(trade_alert_msg)
-                self.state_manager.record_alert_sent(alert_key)
+                # 3. Dispatch new opposite trade entry alert
+                alert_payload = {
+                    **sig_data,
+                    "strategy_name": STRATEGY_NAME,
+                    "contract": contract_sym,
+                    "direction": "LONG" if sig == "BUY" else "SHORT",
+                    "pos_before": current_pos,
+                    "pos_after": new_pos,
+                    "action": action,
+                    "quantity": base_order_qty,
+                    "entry_price": fill_price,
+                    "price_type": "MARKET",
+                    "exchange": EXCHANGE,
+                    "product": PRODUCT,
+                    "order_id": order_id,
+                    "order_status": order_status,
+                    "execution_time": get_current_ist().strftime("%H:%M:%S"),
+                }
+                alert_key = f"ORDER_ALERT_{order_id}"
+                if not self.state_manager.is_alert_sent(alert_key):
+                    trade_alert_msg = format_paper_trade_alert(alert_payload)
+                    send_telegram_alert(trade_alert_msg)
+                    self.state_manager.record_alert_sent(alert_key)
+                return True, active_positions_count
+
             else:
-                logger.info(f"ℹ️ [ALERT DEDUP] Telegram alert for order {order_id} already sent. Skipping duplicate.")
+                # Fresh entry (current_pos == 0)
+                new_pos = base_order_qty if action == "BUY" else -base_order_qty
+                tracked = self.state_manager.state.get("tracked_positions", {})
+                tracked[contract_sym] = {
+                    "contract": contract_sym,
+                    "base_symbol": symbol,
+                    "direction": "LONG" if new_pos > 0 else "SHORT",
+                    "quantity": new_pos,
+                    "average_price": fill_price,
+                    "candle_time": candle_time,
+                    "last_order_id": order_id,
+                }
+                self.state_manager.update_tracked_positions(tracked)
+
+                alert_payload = {
+                    **sig_data,
+                    "strategy_name": STRATEGY_NAME,
+                    "contract": contract_sym,
+                    "direction": "LONG" if sig == "BUY" else "SHORT",
+                    "pos_before": 0,
+                    "pos_after": new_pos,
+                    "action": action,
+                    "quantity": exec_qty,
+                    "entry_price": fill_price,
+                    "price_type": "MARKET",
+                    "exchange": EXCHANGE,
+                    "product": PRODUCT,
+                    "order_id": order_id,
+                    "order_status": order_status,
+                    "execution_time": get_current_ist().strftime("%H:%M:%S"),
+                }
+                alert_key = f"ORDER_ALERT_{order_id}"
+                if not self.state_manager.is_alert_sent(alert_key):
+                    trade_alert_msg = format_paper_trade_alert(alert_payload)
+                    send_telegram_alert(trade_alert_msg)
+                    self.state_manager.record_alert_sent(alert_key)
+                return True, active_positions_count + 1
 
             # Research CSV Logging
             research_entry = {

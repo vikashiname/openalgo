@@ -341,10 +341,24 @@ def format_trade_alert(data: Dict[str, Any]) -> str:
     except (TypeError, ValueError):
         entry_price_val = 0.0
 
-    if trigger_px and float(trigger_px) > 0:
-        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n<b>Trigger Price:</b> ₹{float(trigger_px):.2f}\n"
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "2.0"))
+    sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "3.5"))
+
+    if entry_price_val > 0:
+        if direction == "LONG":
+            target_px = entry_price_val * (1.0 + target_pct / 100.0)
+            sl_px = entry_price_val * (1.0 - sl_pct / 100.0)
+        else:
+            target_px = entry_price_val * (1.0 - target_pct / 100.0)
+            sl_px = entry_price_val * (1.0 + sl_pct / 100.0)
+        target_sl_lines = f"<b>🎯 Target:</b> ₹{target_px:.2f} ({'+' if direction == 'LONG' else '-'}{target_pct:.1f}%)\n<b>🛑 Stop Loss:</b> ₹{sl_px:.2f} ({'-' if direction == 'LONG' else '+'}{sl_pct:.1f}%)\n"
     else:
-        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n"
+        target_sl_lines = ""
+
+    if trigger_px and float(trigger_px) > 0:
+        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n<b>Trigger Price:</b> ₹{float(trigger_px):.2f}\n{target_sl_lines}"
+    else:
+        price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n{target_sl_lines}"
 
     close_val = data.get("close", 0.0)
     macd_val = data.get("macd", 0.0)
@@ -377,6 +391,100 @@ def format_trade_alert(data: Dict[str, Any]) -> str:
         f"─────────────────────\n"
         f"<i>ℹ️ Mode: PAPER / ANALYZE ONLY</i>"
     )
+
+
+def format_paper_exit_alert(data: Dict[str, Any]) -> str:
+    """
+    Formats an HTML Telegram alert message for paper trading position exits
+    (TARGET_HIT, CATASTROPHE_SL, MACD_REVERSAL, SIGNAL_EXIT).
+    """
+    strategy_name = data.get("strategy_name", STRATEGY_NAME)
+    contract = data.get("contract", "N/A")
+    symbol = data.get("symbol", "N/A")
+    direction = data.get("direction", "LONG")  # Position direction that was exited
+    action = data.get("action", "SELL" if direction == "LONG" else "BUY")
+    exit_reason = data.get("exit_reason", "UNKNOWN")
+    qty = abs(int(data.get("quantity", 0)))
+    order_id = data.get("order_id", "N/A")
+    order_status = data.get("order_status", "FILLED")
+    exec_time = data.get("execution_time") or datetime.now(IST).strftime("%H:%M:%S")
+    candle_time = data.get("candle_time_str") or data.get("candle_time", "N/A")
+
+    entry_price = float(data.get("entry_price", 0.0) or 0.0)
+    exit_price = float(data.get("exit_price", 0.0) or 0.0)
+
+    # Calculate P&L
+    dir_mult = 1.0 if direction == "LONG" else -1.0
+    if entry_price > 0:
+        pnl_pct = ((exit_price - entry_price) / entry_price) * 100.0 * dir_mult
+        pnl_abs = (exit_price - entry_price) * qty * dir_mult
+    else:
+        pnl_pct = 0.0
+        pnl_abs = 0.0
+
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "2.0"))
+    sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "3.5"))
+
+    if entry_price > 0:
+        if direction == "LONG":
+            target_px = entry_price * (1.0 + target_pct / 100.0)
+            sl_px = entry_price * (1.0 - sl_pct / 100.0)
+        else:
+            target_px = entry_price * (1.0 - target_pct / 100.0)
+            sl_px = entry_price * (1.0 + sl_pct / 100.0)
+        target_sl_lines = f"<b>🎯 Target:</b> ₹{target_px:.2f} ({'+' if direction == 'LONG' else '-'}{target_pct:.1f}%)\n<b>🛑 Stop Loss:</b> ₹{sl_px:.2f} ({'-' if direction == 'LONG' else '+'}{sl_pct:.1f}%)\n"
+    else:
+        target_sl_lines = ""
+
+    pnl_emoji = "🟢" if pnl_abs > 0 else ("🔴" if pnl_abs < 0 else "⚪")
+    if pnl_abs > 0:
+        pnl_str = f"+₹{pnl_abs:,.2f} (+{pnl_pct:.2f}%)"
+    elif pnl_abs < 0:
+        pnl_str = f"-₹{abs(pnl_abs):,.2f} ({pnl_pct:.2f}%)"
+    else:
+        pnl_str = f"₹0.00 (0.00%)"
+
+    if exit_reason == "TARGET_HIT":
+        reason_header = "🎯 TARGET HIT"
+        reason_badge = "🎯 <b>TARGET REACHED</b>"
+    elif exit_reason == "CATASTROPHE_SL":
+        reason_header = "🛑 CATASTROPHE STOP-LOSS"
+        reason_badge = "🛑 <b>EMERGENCY STOP LOSS TRIGGERED</b>"
+    elif "REVERSAL" in exit_reason:
+        reason_header = "🔄 REVERSAL EXIT"
+        reason_badge = "🔄 <b>OPPOSITE MACD SIGNAL REVERSAL</b>"
+    elif exit_reason == "SIGNAL_EXIT":
+        reason_header = "🔄 SIGNAL EXIT"
+        reason_badge = "🔄 <b>OPPOSITE SIGNAL EXIT (ENTRY BLOCKED)</b>"
+    else:
+        reason_header = f"EXIT ({exit_reason})"
+        reason_badge = f"ℹ️ <b>{exit_reason}</b>"
+
+    return (
+        f"{pnl_emoji} <b>PAPER TRADE — {reason_header}</b>\n\n"
+        f"<b>Strategy:</b> {strategy_name} (MACD 12/26/9 + 2-Bar Expansion)\n"
+        f"🔬 <b>ANALYZE MODE - No Real Order</b>\n"
+        f"─────────────────────\n"
+        f"<b>Symbol:</b> <code>{contract}</code> ({symbol})\n"
+        f"<b>Exited Direction:</b> <b>{direction}</b>\n"
+        f"<b>Exit Action:</b> <b>{action}</b>\n"
+        f"<b>Exit Reason:</b> {reason_badge}\n"
+        f"<b>Quantity:</b> {qty}\n"
+        f"<b>Entry Price:</b> ₹{entry_price:.2f}\n"
+        f"<b>Exit Price:</b> ₹{exit_price:.2f}\n"
+        f"{target_sl_lines}"
+        f"<b>Net P&L:</b> {pnl_str}\n"
+        f"<b>Exchange:</b> {EXCHANGE}\n"
+        f"<b>Product:</b> {PRODUCT}\n"
+        f"<b>Order ID:</b> <code>{order_id}</code>\n"
+        f"<b>Order Status:</b> {order_status}\n"
+        f"⏰ <b>Time:</b> {exec_time} IST\n"
+        f"─────────────────────\n"
+        f"📊 <b>Completed Candle:</b> {candle_time}\n"
+        f"─────────────────────\n"
+        f"<i>ℹ️ Mode: PAPER / ANALYZE ONLY</i>"
+    )
+
 
 EXCHANGE = "NFO"
 PRODUCT = os.getenv("PRODUCT", "NRML")
@@ -1306,6 +1414,11 @@ class NFOPortfolioLiveTrader:
                 return int(pos["quantity"])
         except Exception as e:
             logger.warning(f"Position query warning for {contract_symbol}: {e}")
+        
+        tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_symbol, {})
+        if tracked:
+            return int(tracked.get("quantity", 0))
+
         return 0
 
     def _fetch_and_eval_symbol(self, sym: str) -> Dict[str, Any]:
@@ -1489,7 +1602,10 @@ class NFOPortfolioLiveTrader:
         attempt = 0
         resp = None
 
-        order_kwargs: Dict[str, Any] = {}
+        order_kwargs: Dict[str, Any] = {
+            "disable_telegram": True,
+            "notify": False,
+        }
         if trigger_price is not None and float(trigger_price) > 0:
             order_kwargs["trigger_price"] = float(trigger_price)
 
@@ -1666,6 +1782,50 @@ class NFOPortfolioLiveTrader:
         msg = format_trade_alert(alert_data)
         send_telegram_alert(msg)
 
+    def dispatch_exit_alert(
+        self,
+        symbol: str,
+        contract_symbol: str,
+        direction: str,
+        action: str,
+        exit_reason: str,
+        exec_qty: int,
+        entry_price: float,
+        exit_price: float,
+        candle_time: Any,
+        order_resp: Dict[str, Any],
+    ):
+        """Dispatches a structured Telegram exit alert for position closures (Target, SL, Signal, Reversal Exit)."""
+        order_id = str(order_resp.get("orderid", "")) if isinstance(order_resp, dict) else ""
+        if not order_id:
+            return
+
+        alert_key = f"MACD_EXIT_{order_id}"
+        if order_id in self.sent_alert_orders or self.state_manager.is_alert_sent(alert_key):
+            logger.info(f"ℹ️ [ALERT DEDUP] Exit alert for order {order_id} already sent. Skipping duplicate.")
+            return
+
+        self.sent_alert_orders.add(order_id)
+        self.state_manager.record_alert_sent(alert_key)
+
+        exit_data = {
+            "strategy_name": STRATEGY_NAME,
+            "contract": contract_symbol,
+            "symbol": symbol,
+            "direction": direction,
+            "action": action,
+            "exit_reason": exit_reason,
+            "quantity": exec_qty,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "order_id": order_id,
+            "order_status": "FILLED",
+            "candle_time": str(candle_time),
+            "execution_time": datetime.now(IST).strftime("%H:%M:%S") if "IST" in globals() else datetime.now().strftime("%H:%M:%S"),
+        }
+        msg = format_paper_exit_alert(exit_data)
+        send_telegram_alert(msg)
+
     def check_and_execute_target_or_sl(self, symbol: str, contract_sym: str, pos_qty: int, df: pd.DataFrame) -> bool:
         """
         Dynamic Profit Target & Catastrophe SL Risk Manager.
@@ -1711,6 +1871,21 @@ class NFOPortfolioLiveTrader:
             candle_time = df.index[-1] if hasattr(df.index[-1], "isoformat") else str(df.index[-1])
             resp = self.place_order(symbol, contract_sym, action=exit_action, quantity=exit_qty, candle_time=candle_time)
             if resp:
+                order_id = resp.get("orderid", "")
+                fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=last_close)
+                direction = "LONG" if pos_qty > 0 else "SHORT"
+                self.dispatch_exit_alert(
+                    symbol=symbol,
+                    contract_symbol=contract_sym,
+                    direction=direction,
+                    action=exit_action,
+                    exit_reason=exit_reason,
+                    exec_qty=exit_qty,
+                    entry_price=entry_price,
+                    exit_price=fill_px,
+                    candle_time=candle_time,
+                    order_resp=resp,
+                )
                 all_tracked = self.state_manager.state.get("tracked_positions", {})
                 all_tracked.pop(contract_sym, None)
                 self.state_manager.update_tracked_positions(all_tracked)
@@ -1849,26 +2024,78 @@ class NFOPortfolioLiveTrader:
                     else:
                         logger.info(f"⏸️ [RISK GATE] Max active positions ({self.max_active}) reached. Skipping {sym}.")
                 elif pos < 0:
-                    logger.info(f"🔄 [REVERSE SHORT->LONG] Reversing short position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
-                    reverse_qty = abs(pos) + order_qty
-                    resp = self.place_order(sym, contract_sym, action="BUY", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
-                    if resp:
-                        self.last_processed_candle[sym] = str(candle_time)
-                        self.state_manager.record_processed_candle(sym, candle_time)
-                        self.state_manager.record_execution(sym, contract_sym, "BUY", reverse_qty, candle_time, resp)
-                        order_id = resp.get("orderid", "")
-                        fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
-                        all_tracked = self.state_manager.state.get("tracked_positions", {})
-                        all_tracked[contract_sym] = {
-                            "contract": contract_sym,
-                            "base_symbol": sym,
-                            "direction": "LONG",
-                            "quantity": order_qty,
-                            "average_price": fill_px,
-                            "candle_time": str(candle_time),
-                        }
-                        self.state_manager.update_tracked_positions(all_tracked)
-                        self.dispatch_trade_alert(sym, contract_sym, "BUY", "LONG", pos, reverse_qty, candle_time, trigger_price, resp, c)
+                    time_ok, time_reason = is_entry_time_allowed()
+                    df_sym = c.get("df")
+                    regime_ok, regime_reason = is_long_regime_allowed(sym, df_sym)
+
+                    if time_ok and regime_ok:
+                        logger.info(f"🔄 [REVERSE SHORT->LONG] Reversing short position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
+                        reverse_qty = abs(pos) + order_qty
+                        resp = self.place_order(sym, contract_sym, action="BUY", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
+                        if resp:
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            self.state_manager.record_execution(sym, contract_sym, "BUY", reverse_qty, candle_time, resp)
+                            order_id = resp.get("orderid", "")
+                            fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
+                            
+                            # 1. Exit alert for prior SHORT position
+                            prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
+                            prior_entry_px = float(prior_tracked.get("average_price", 0.0) or close_px)
+                            self.dispatch_exit_alert(
+                                symbol=sym,
+                                contract_symbol=contract_sym,
+                                direction="SHORT",
+                                action="BUY",
+                                exit_reason="MACD_REVERSAL",
+                                exec_qty=abs(pos),
+                                entry_price=prior_entry_px,
+                                exit_price=fill_px,
+                                candle_time=candle_time,
+                                order_resp={"orderid": f"{order_id}_REV_EXIT"},
+                            )
+                            
+                            # 2. Update tracked position
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked[contract_sym] = {
+                                "contract": contract_sym,
+                                "base_symbol": sym,
+                                "direction": "LONG",
+                                "quantity": order_qty,
+                                "average_price": fill_px,
+                                "candle_time": str(candle_time),
+                            }
+                            self.state_manager.update_tracked_positions(all_tracked)
+                            
+                            # 3. New LONG trade alert
+                            self.dispatch_trade_alert(sym, contract_sym, "BUY", "LONG", pos, order_qty, candle_time, trigger_price, resp, c)
+                    else:
+                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing SHORT pos ({pos}) to FLAT (opposite entry blocked: {time_reason if not time_ok else regime_reason}). Order Qty = {abs(pos)}")
+                        resp = self.place_order(sym, contract_sym, action="BUY", quantity=abs(pos), candle_time=candle_time, trigger_price=trigger_price)
+                        if resp:
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            self.state_manager.record_execution(sym, contract_sym, "BUY", abs(pos), candle_time, resp)
+                            order_id = resp.get("orderid", "")
+                            fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
+                            
+                            prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
+                            prior_entry_px = float(prior_tracked.get("average_price", 0.0) or close_px)
+                            self.dispatch_exit_alert(
+                                symbol=sym,
+                                contract_symbol=contract_sym,
+                                direction="SHORT",
+                                action="BUY",
+                                exit_reason="SIGNAL_EXIT",
+                                exec_qty=abs(pos),
+                                entry_price=prior_entry_px,
+                                exit_price=fill_px,
+                                candle_time=candle_time,
+                                order_resp=resp,
+                            )
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked.pop(contract_sym, None)
+                            self.state_manager.update_tracked_positions(all_tracked)
                 else:
                     logger.info(f"ℹ️ Already in LONG position for {sym}.")
 
@@ -1903,26 +2130,75 @@ class NFOPortfolioLiveTrader:
                     else:
                         logger.info(f"⏸️ [RISK GATE] Max active positions ({self.max_active}) reached. Skipping {sym}.")
                 elif pos > 0:
-                    logger.info(f"🔄 [REVERSE LONG->SHORT] Reversing long position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
-                    reverse_qty = pos + order_qty
-                    resp = self.place_order(sym, contract_sym, action="SELL", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
-                    if resp:
-                        self.last_processed_candle[sym] = str(candle_time)
-                        self.state_manager.record_processed_candle(sym, candle_time)
-                        self.state_manager.record_execution(sym, contract_sym, "SELL", reverse_qty, candle_time, resp)
-                        order_id = resp.get("orderid", "")
-                        fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
-                        all_tracked = self.state_manager.state.get("tracked_positions", {})
-                        all_tracked[contract_sym] = {
-                            "contract": contract_sym,
-                            "base_symbol": sym,
-                            "direction": "SHORT",
-                            "quantity": -order_qty,
-                            "average_price": fill_px,
-                            "candle_time": str(candle_time),
-                        }
-                        self.state_manager.update_tracked_positions(all_tracked)
-                        self.dispatch_trade_alert(sym, contract_sym, "SELL", "SHORT", pos, reverse_qty, candle_time, trigger_price, resp, c)
+                    time_ok, time_reason = is_entry_time_allowed()
+                    if time_ok:
+                        logger.info(f"🔄 [REVERSE LONG->SHORT] Reversing long position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
+                        reverse_qty = pos + order_qty
+                        resp = self.place_order(sym, contract_sym, action="SELL", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
+                        if resp:
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            self.state_manager.record_execution(sym, contract_sym, "SELL", reverse_qty, candle_time, resp)
+                            order_id = resp.get("orderid", "")
+                            fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
+                            
+                            # 1. Exit alert for prior LONG position
+                            prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
+                            prior_entry_px = float(prior_tracked.get("average_price", 0.0) or close_px)
+                            self.dispatch_exit_alert(
+                                symbol=sym,
+                                contract_symbol=contract_sym,
+                                direction="LONG",
+                                action="SELL",
+                                exit_reason="MACD_REVERSAL",
+                                exec_qty=pos,
+                                entry_price=prior_entry_px,
+                                exit_price=fill_px,
+                                candle_time=candle_time,
+                                order_resp={"orderid": f"{order_id}_REV_EXIT"},
+                            )
+                            
+                            # 2. Update tracked position
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked[contract_sym] = {
+                                "contract": contract_sym,
+                                "base_symbol": sym,
+                                "direction": "SHORT",
+                                "quantity": -order_qty,
+                                "average_price": fill_px,
+                                "candle_time": str(candle_time),
+                            }
+                            self.state_manager.update_tracked_positions(all_tracked)
+                            
+                            # 3. New SHORT trade alert
+                            self.dispatch_trade_alert(sym, contract_sym, "SELL", "SHORT", pos, order_qty, candle_time, trigger_price, resp, c)
+                    else:
+                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing LONG pos ({pos}) to FLAT (opposite entry blocked: {time_reason}). Order Qty = {pos}")
+                        resp = self.place_order(sym, contract_sym, action="SELL", quantity=pos, candle_time=candle_time, trigger_price=trigger_price)
+                        if resp:
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            self.state_manager.record_execution(sym, contract_sym, "SELL", pos, candle_time, resp)
+                            order_id = resp.get("orderid", "")
+                            fill_px = self.get_order_fill_price(str(order_id), contract_sym, resp, fallback_price=close_px)
+                            
+                            prior_tracked = self.state_manager.state.get("tracked_positions", {}).get(contract_sym, {})
+                            prior_entry_px = float(prior_tracked.get("average_price", 0.0) or close_px)
+                            self.dispatch_exit_alert(
+                                symbol=sym,
+                                contract_symbol=contract_sym,
+                                direction="LONG",
+                                action="SELL",
+                                exit_reason="SIGNAL_EXIT",
+                                exec_qty=pos,
+                                entry_price=prior_entry_px,
+                                exit_price=fill_px,
+                                candle_time=candle_time,
+                                order_resp=resp,
+                            )
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked.pop(contract_sym, None)
+                            self.state_manager.update_tracked_positions(all_tracked)
                 else:
                     logger.info(f"ℹ️ Already in SHORT position for {sym}.")
         t_exec_duration = time.perf_counter() - t_exec_start

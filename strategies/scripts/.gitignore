@@ -8,9 +8,15 @@
 *.log
 
 # Ignore backup files
-*.bak
-*.backup
+*.bak*
+*.backup*
 *~
+
+# Ignore runtime states, reports, and data
+*.json
+*.html
+*.txt
+*.csv
 
 # Ignore Python cache
 __pycache__/
