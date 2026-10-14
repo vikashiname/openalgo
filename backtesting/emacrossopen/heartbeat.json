@@ -1,0 +1,17 @@
+{
+  "strategy": "EMACROSS_FNO_PAPER",
+  "pid": 9285,
+  "timestamp_ist": "2026-09-08 16:35:39 IST",
+  "timestamp_epoch": 1788865539.266823,
+  "status": "STOPPED",
+  "openalgo_host": "https://vikashiname.in",
+  "openalgo_mode": "analyze",
+  "active_positions_count": 11,
+  "instruments_scanned": 0,
+  "signals_detected": 0,
+  "paper_orders_count": 0,
+  "last_scan": "2026-09-08 16:35:39 IST",
+  "api_status": "CONNECTED",
+  "last_completed_candle": "{}",
+  "details": {}
+}

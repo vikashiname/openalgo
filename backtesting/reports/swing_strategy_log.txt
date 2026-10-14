@@ -1,0 +1,8 @@
+Data loaded: 495 candles
+\n================================================================================
+ICHIMOKU + MACD + STOCH RSI SWING STRATEGY BACKTEST WITH TRAILING STOP LOSS
+================================================================================
+Symbol: TCS
+Data Points: 495
+Period: 2024-04-08 00:00:00 to 2026-04-07 00:00:00
+Trailing SL: 2.0%

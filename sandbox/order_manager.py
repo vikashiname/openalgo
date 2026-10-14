@@ -317,10 +317,95 @@ class OrderManager:
                         and temp_existing_position.ltp > 0
                     ):
                         margin_calculation_price = temp_existing_position.ltp
+                        cached_quote = {
+                            "ltp": float(margin_calculation_price),
+                            "bid": float(margin_calculation_price),
+                            "ask": float(margin_calculation_price),
+                        }
                         logger.warning(
                             f"Quote fetch failed, using last known price {margin_calculation_price} for {symbol}"
                         )
                         quote_fetch_success = True
+
+                # Attempt 2b: Use WebSocket cache / MarketDataService
+                if not quote_fetch_success:
+                    try:
+                        from services.market_data_service import get_market_data_service
+
+                        mds = get_market_data_service()
+                        if mds:
+                            ws_data = mds.get_all_data(symbol, exchange)
+                            if ws_data:
+                                ltp_data = ws_data.get("ltp", {})
+                                ws_ltp = (
+                                    ltp_data.get("value")
+                                    if isinstance(ltp_data, dict)
+                                    else ws_data.get("ltp")
+                                )
+                                if ws_ltp and float(ws_ltp) > 0:
+                                    margin_calculation_price = Decimal(str(ws_ltp))
+                                    cached_quote = {
+                                        "ltp": float(ws_ltp),
+                                        "bid": float(ws_ltp),
+                                        "ask": float(ws_ltp),
+                                    }
+                                    logger.info(
+                                        f"Using WebSocket LTP {margin_calculation_price} for MARKET order {symbol}"
+                                    )
+                                    quote_fetch_success = True
+                    except Exception as e:
+                        logger.debug(f"WebSocket quote lookup failed: {e}")
+
+                # Attempt 2c: Use order parameter fallback (price / trigger_price / underlying_ltp)
+                if not quote_fetch_success:
+                    for fallback_field in ["price", "trigger_price", "underlying_ltp"]:
+                        val = order_data.get(fallback_field)
+                        if val:
+                            try:
+                                dec_val = Decimal(str(val))
+                                if dec_val > 0:
+                                    margin_calculation_price = dec_val
+                                    cached_quote = {
+                                        "ltp": float(dec_val),
+                                        "bid": float(dec_val),
+                                        "ask": float(dec_val),
+                                    }
+                                    logger.warning(
+                                        f"Quote fetch failed (rate limit/timeout), using order parameter fallback {fallback_field}={margin_calculation_price} for {symbol}"
+                                    )
+                                    quote_fetch_success = True
+                                    break
+                            except Exception:
+                                pass
+
+                # Attempt 2d: Try fetching last candle close from history service
+                if not quote_fetch_success:
+                    try:
+                        from services.history_service import get_history
+
+                        hist_success, hist_data, _ = get_history(
+                            symbol=symbol, exchange=exchange, interval="1m"
+                        )
+                        if (
+                            hist_success
+                            and hist_data
+                            and "candles" in hist_data
+                            and hist_data["candles"]
+                        ):
+                            last_close = hist_data["candles"][-1][4]
+                            if last_close and float(last_close) > 0:
+                                margin_calculation_price = Decimal(str(last_close))
+                                cached_quote = {
+                                    "ltp": float(last_close),
+                                    "bid": float(last_close),
+                                    "ask": float(last_close),
+                                }
+                                logger.warning(
+                                    f"Quote fetch failed, using last candle close {margin_calculation_price} for {symbol}"
+                                )
+                                quote_fetch_success = True
+                    except Exception as e:
+                        logger.debug(f"History candle close fallback failed: {e}")
 
                 # Attempt 3: Reject order if no valid price available
                 if not quote_fetch_success:

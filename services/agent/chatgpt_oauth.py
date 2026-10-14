@@ -817,7 +817,12 @@ def is_subscription_model(model_id: str | None) -> bool:
     name = (model_id or "").strip()
     if not name:
         return False
-    if name.startswith(MODEL_PREFIX):
+    lower = name.lower()
+    if (
+        lower.startswith(MODEL_PREFIX)
+        or lower.startswith("chatgpt ")
+        or lower.startswith("chatgpt:")
+    ):
         return True
 
     try:

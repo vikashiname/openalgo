@@ -141,3 +141,24 @@ class TestItFailsQuietly:
         added = chatgpt_models.register(fake)
 
         assert len(added) == len(chatgpt_models.SUPPLEMENTAL)
+
+
+class TestCodexModelAvailability:
+    def test_refused_codex_models_are_documented_and_aliased(self):
+        assert "gpt-5.4" in chatgpt_models.REFUSED_MODELS
+        assert "gpt-5.4-pro" in chatgpt_models.REFUSED_MODELS
+        assert chatgpt_models.CODEX_MODEL_ALIASES["gpt-5.4"] == "gpt-5.5"
+        assert chatgpt_models.CODEX_MODEL_ALIASES["gpt-5.6"] == "gpt-5.6-sol"
+
+    def test_verified_available_models_are_defined(self):
+        assert "gpt-5.5" in chatgpt_models.AVAILABLE_MODELS
+        assert "gpt-5.6-sol" in chatgpt_models.AVAILABLE_MODELS
+        assert "gpt-5.6-luna" in chatgpt_models.AVAILABLE_MODELS
+        assert "gpt-5.6-terra" in chatgpt_models.AVAILABLE_MODELS
+        assert "gpt-6-astra" in chatgpt_models.AVAILABLE_MODELS
+
+    def test_normalize_subscription_model(self):
+        assert chatgpt_models.normalize_subscription_model("gpt-5.4") == "gpt-5.5"
+        assert chatgpt_models.normalize_subscription_model("chatgpt/gpt-5.4") == "chatgpt/gpt-5.5"
+        assert chatgpt_models.normalize_subscription_model("chatgpt/gpt-5.6-sol") == "chatgpt/gpt-5.6-sol"
+

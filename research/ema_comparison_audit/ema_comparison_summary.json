@@ -1,0 +1,140 @@
+{
+  "metadata": {
+    "dataset_instruments_count": 33,
+    "date_range_start": "2023-09-29",
+    "date_range_end": "2026-09-09",
+    "in_sample_cutoff": "2025-07-01",
+    "friction_base": 0.07,
+    "long_tp": 3.0,
+    "short_tp": 1.5,
+    "catastrophe_sl": 6.0
+  },
+  "baseline_summary": {
+    "label": "Baseline (9/26)",
+    "trade_count": 1820,
+    "win_rate_pct": 52.36,
+    "profit_factor": 1.044,
+    "expectancy_pct": 0.0495,
+    "total_return_pct": 90.14,
+    "cagr_pct": 30.74,
+    "sharpe_ratio": 0.45,
+    "max_drawdown_pct": 75.66,
+    "avg_win_pct": 2.25,
+    "avg_loss_pct": 2.37,
+    "win_loss_ratio": 0.95,
+    "avg_bars_held": 27.1,
+    "median_bars_held": 12.0,
+    "years": 2.93,
+    "gates": [
+      {
+        "name": "1. Risk-Adjusted Return (Sharpe)",
+        "target": "Sharpe >= 1.00",
+        "actual": "0.45",
+        "passed": false
+      },
+      {
+        "name": "2. Compound Annual Return (CAGR)",
+        "target": "CAGR >= 7.0%",
+        "actual": "30.7%",
+        "passed": true
+      },
+      {
+        "name": "3. Profit Factor",
+        "target": "Profit Factor >= 1.30",
+        "actual": "1.04",
+        "passed": false
+      },
+      {
+        "name": "4. Maximum Drawdown (MDD)",
+        "target": "Max DD <= 20.0%",
+        "actual": "75.7%",
+        "passed": false
+      },
+      {
+        "name": "5. Win Rate",
+        "target": "Win Rate >= 40.0%",
+        "actual": "52.4%",
+        "passed": true
+      },
+      {
+        "name": "6. Sample Size",
+        "target": "Trade Count >= 100",
+        "actual": "1820",
+        "passed": true
+      },
+      {
+        "name": "7. Trade Expectancy",
+        "target": "Expectancy > 0.0%",
+        "actual": "0.050%",
+        "passed": true
+      }
+    ],
+    "passed_gates_count": 4,
+    "total_gates_count": 7,
+    "overall_passed": false
+  },
+  "candidate_summary": {
+    "label": "Candidate (10/28)",
+    "trade_count": 1600,
+    "win_rate_pct": 53.75,
+    "profit_factor": 1.047,
+    "expectancy_pct": 0.0543,
+    "total_return_pct": 86.93,
+    "cagr_pct": 29.65,
+    "sharpe_ratio": 0.45,
+    "max_drawdown_pct": 113.3,
+    "avg_win_pct": 2.25,
+    "avg_loss_pct": 2.5,
+    "win_loss_ratio": 0.9,
+    "avg_bars_held": 28.3,
+    "median_bars_held": 13.0,
+    "years": 2.93,
+    "gates": [
+      {
+        "name": "1. Risk-Adjusted Return (Sharpe)",
+        "target": "Sharpe >= 1.00",
+        "actual": "0.45",
+        "passed": false
+      },
+      {
+        "name": "2. Compound Annual Return (CAGR)",
+        "target": "CAGR >= 7.0%",
+        "actual": "29.6%",
+        "passed": true
+      },
+      {
+        "name": "3. Profit Factor",
+        "target": "Profit Factor >= 1.30",
+        "actual": "1.05",
+        "passed": false
+      },
+      {
+        "name": "4. Maximum Drawdown (MDD)",
+        "target": "Max DD <= 20.0%",
+        "actual": "113.3%",
+        "passed": false
+      },
+      {
+        "name": "5. Win Rate",
+        "target": "Win Rate >= 40.0%",
+        "actual": "53.8%",
+        "passed": true
+      },
+      {
+        "name": "6. Sample Size",
+        "target": "Trade Count >= 100",
+        "actual": "1600",
+        "passed": true
+      },
+      {
+        "name": "7. Trade Expectancy",
+        "target": "Expectancy > 0.0%",
+        "actual": "0.054%",
+        "passed": true
+      }
+    ],
+    "passed_gates_count": 4,
+    "total_gates_count": 7,
+    "overall_passed": false
+  }
+}

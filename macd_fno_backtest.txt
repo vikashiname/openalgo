@@ -1,0 +1,22 @@
+
+================================================================================
+🚀 OPENALGO NFO F&O MULTI-ASSET MACD STRATEGY (FUTURES SEGMENT)
+================================================================================
+📅 Period: 2018-01-01 to 2026-10-13
+📊 Target Symbols Count: 1 NFO Instruments
+⏱️ Timeframe Interval: '1h' (Best Performing Setup)
+================================================================================
+
+📈 Processing RELIANCE (RELIANCE.NS) | Lot Size: 500...
+✅ RELIANCE: 284 Trades | Win Rate: 39.08% | P&L: ₹519,463.26
+
+================================================================================
+📊 OVERALL NFO F&O PORTFOLIO PERFORMANCE SUMMARY
+================================================================================
+Total NFO Instruments Evaluated: 1
+Profitable Shares Count        : 1 / 1
+Total Portfolio Trades Executed: 284
+Total Net Portfolio P&L (₹)    : ₹519,463.26
+================================================================================
+✅ HTML Report generated: /Users/mac/Desktop/openalgo/macd_fno_portfolio_report.html
+✅ Text log written to: /Users/mac/Desktop/openalgo/macd_fno_backtest.txt

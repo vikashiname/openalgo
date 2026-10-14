@@ -1,0 +1,118 @@
+{
+  "audit_timestamp": "2026-09-05T14:30:00+05:30",
+  "program": "AGY Futures OI Auto-Research System",
+  "phase": "Phase 1 - Data Audit Only",
+  "audited_sources": [
+    {
+      "source_id": "NSE_OFFICIAL_BHAVCOPY",
+      "name": "National Stock Exchange of India - Historical Derivatives Bhavcopy Archive",
+      "authority": "Official Exchange",
+      "url_pattern_legacy": "https://nsearchives.nseindia.com/content/historical/DERIVATIVES/{YYYY}/{MMM}/fo{DD}{MMM}{YYYY}bhav.csv.zip",
+      "url_pattern_udiff": "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{YYYYMMDD}_F_0000.csv.zip",
+      "format_transition_date": "2024-07-08",
+      "earliest_verified_date": "2010-05-14",
+      "latest_verified_date": "Current",
+      "granularity": "Daily (End-of-Day)",
+      "instruments_covered": [
+        "FUTIDX (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50)",
+        "FUTSTK (~180+ liquid equities)",
+        "OPTIDX",
+        "OPTSTK"
+      ],
+      "fields_legacy": [
+        "INSTRUMENT",
+        "SYMBOL",
+        "EXPIRY_DT",
+        "STRIKE_PR",
+        "OPTION_TYP",
+        "OPEN",
+        "HIGH",
+        "LOW",
+        "CLOSE",
+        "SETTLE_PR",
+        "CONTRACTS",
+        "VAL_INLAKH",
+        "OPEN_INT",
+        "CHG_IN_OI",
+        "TIMESTAMP"
+      ],
+      "fields_udiff": [
+        "TradDt",
+        "BizDt",
+        "Sgmt",
+        "Src",
+        "FinInstrmTp",
+        "FinInstrmId",
+        "ISIN",
+        "TckrSymb",
+        "SctySrs",
+        "XpryDt",
+        "FininstrmActlXpryDt",
+        "StrkPric",
+        "OptnTp",
+        "FinInstrmNm",
+        "OpnPric",
+        "HghPric",
+        "LwPric",
+        "ClsPric",
+        "LastPric",
+        "PrvsClsgPric",
+        "UndrlygPric",
+        "SttlmPric",
+        "OpnIntrst",
+        "ChngInOpnIntrst",
+        "TtlTradgVol",
+        "TtlTrfVal",
+        "TtlNbOfTxsExctd",
+        "SsnId",
+        "NewBrdLotQty",
+        "Rmks"
+      ],
+      "authenticity": "100% Exchange Primary Source",
+      "survivorship_bias": "None (includes all expired contracts, mergers, and delisted F&O symbols)",
+      "intraday_oi_support": false,
+      "suitability_rating": "Grade A+ for Daily OI Research"
+    },
+    {
+      "source_id": "OPENALGO_BROKER_REST_APIS",
+      "name": "OpenAlgo Multi-Broker Connectors (Zerodha Kite, Dhan, Upstox, Angel One, Shoonya)",
+      "authority": "Broker API Gateway / Intermediary",
+      "granularity": "Intraday (1m, 5m, 15m, 60m) and Daily",
+      "current_auth_status": "0 active sessions (requires user interactive login/TOTP)",
+      "limitations": [
+        "Expired futures contract history is unavailable (brokers purge or unindex tokens upon contract expiry)",
+        "Intraday lookback caps apply (60-90 days for 1m, 180-360 days for 15m)",
+        "Broker rate limits (3 to 5 req/sec)",
+        "Intraday OI is broker-sampled / interpolated, not audited exchange book records"
+      ],
+      "intraday_oi_support": true,
+      "suitability_rating": "Grade C for Multi-Year Backtests (restricted to forward observation & current active contract only)"
+    },
+    {
+      "source_id": "OPENALGO_HISTORIFY_DUCKDB",
+      "name": "OpenAlgo Local DuckDB Storage (db/historify.duckdb)",
+      "authority": "Local Cache",
+      "current_records": 1240,
+      "current_symbols": [
+        "TCS (Equity)"
+      ],
+      "current_oi_coverage": "0% (Equity contains OI=0)",
+      "suitability_rating": "Ready infrastructure, awaiting F&O Bhavcopy ingestion"
+    },
+    {
+      "source_id": "YAHOO_FINANCE",
+      "name": "Yahoo Finance (via yfinance)",
+      "authority": "Third-Party Aggregator",
+      "fno_coverage": "None (No Indian NSE F&O contracts; Commodity futures only provide OHLCV without intraday OI)",
+      "suitability_rating": "Unsuitable for Indian Futures OI Research"
+    },
+    {
+      "source_id": "MCX_BHAVCOPY",
+      "name": "Multi Commodity Exchange of India (MCX)",
+      "authority": "Official Exchange",
+      "granularity": "Daily",
+      "access_status": "WAF Protected (Cloudflare/Akamai blocks automated unauthenticated HTTP requests)",
+      "suitability_rating": "Separate statistical population, requires custom ingestion or broker MCX feed"
+    }
+  ]
+}

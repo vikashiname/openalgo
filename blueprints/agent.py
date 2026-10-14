@@ -604,6 +604,8 @@ def create_model():
     if not model_name:
         return _error("A model name is required", 400)
     display_name = str(body.get("display_name") or "").strip() or model_name
+    if provider_kind == "litellm":
+        model_name = providers.litellm_model_id(provider_kind, model_name)
 
     base_url, url_error = _validate_base_url(body.get("base_url"), provider_kind)
     if url_error:

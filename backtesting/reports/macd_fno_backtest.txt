@@ -1,0 +1,65 @@
+
+================================================================================
+🚀 OPENALGO NFO F&O MULTI-ASSET MACD STRATEGY (FUTURES SEGMENT)
+================================================================================
+📅 Period: 2018-01-01 to 2026-08-23
+📊 Target Symbols Count: 15 NFO Instruments
+⏱️ Timeframe Interval: '1h' (Best Performing Setup)
+================================================================================
+
+📈 Processing M&M (M&M.NS) | Lot Size: 350...
+✅ M&M: 293 Trades | Win Rate: 42.32% | P&L: ₹690,130.53
+
+📈 Processing EICHERMOT (EICHERMOT.NS) | Lot Size: 175...
+✅ EICHERMOT: 274 Trades | Win Rate: 41.97% | P&L: ₹449,923.72
+
+📈 Processing BAJFINANCE (BAJFINANCE.NS) | Lot Size: 125...
+✅ BAJFINANCE: 260 Trades | Win Rate: 43.08% | P&L: ₹524,093.52
+
+📈 Processing AXISBANK (AXISBANK.NS) | Lot Size: 625...
+✅ AXISBANK: 242 Trades | Win Rate: 46.28% | P&L: ₹445,249.29
+
+📈 Processing HEROMOTOCO (HEROMOTOCO.NS) | Lot Size: 150...
+✅ HEROMOTOCO: 270 Trades | Win Rate: 42.22% | P&L: ₹250,223.36
+
+📈 Processing ADANIPORTS (ADANIPORTS.NS) | Lot Size: 400...
+✅ ADANIPORTS: 271 Trades | Win Rate: 43.91% | P&L: ₹244,499.32
+
+📈 Processing TATASTEEL (TATASTEEL.NS) | Lot Size: 5500...
+✅ TATASTEEL: 271 Trades | Win Rate: 42.07% | P&L: ₹133,209.34
+
+📈 Processing HCLTECH (HCLTECH.NS) | Lot Size: 350...
+✅ HCLTECH: 257 Trades | Win Rate: 43.58% | P&L: ₹281,172.49
+
+📈 Processing BHARTIARTL (BHARTIARTL.NS) | Lot Size: 475...
+✅ BHARTIARTL: 255 Trades | Win Rate: 47.45% | P&L: ₹327,868.17
+
+📈 Processing LT (LT.NS) | Lot Size: 150...
+✅ LT: 271 Trades | Win Rate: 39.48% | P&L: ₹225,195.15
+
+📈 Processing ULTRACEMCO (ULTRACEMCO.NS) | Lot Size: 100...
+✅ ULTRACEMCO: 274 Trades | Win Rate: 43.07% | P&L: ₹230,039.26
+
+📈 Processing ONGC (ONGC.NS) | Lot Size: 3850...
+✅ ONGC: 252 Trades | Win Rate: 39.29% | P&L: ₹182,567.17
+
+📈 Processing ASIANPAINT (ASIANPAINT.NS) | Lot Size: 200...
+✅ ASIANPAINT: 266 Trades | Win Rate: 40.60% | P&L: ₹150,260.11
+
+📈 Processing ADANIENT (ADANIENT.NS) | Lot Size: 300...
+✅ ADANIENT: 265 Trades | Win Rate: 42.64% | P&L: ₹52,560.28
+
+📈 Processing NTPC (NTPC.NS) | Lot Size: 1500...
+✅ NTPC: 259 Trades | Win Rate: 42.47% | P&L: ₹53,174.61
+
+================================================================================
+📊 OVERALL NFO F&O PORTFOLIO PERFORMANCE SUMMARY
+================================================================================
+Total NFO Instruments Evaluated: 15
+Profitable Shares Count        : 15 / 15
+Total Portfolio Trades Executed: 3980
+Total Net Portfolio P&L (₹)    : ₹4,240,166.31
+================================================================================
+✅ HTML Report generated: /Users/mac/Desktop/openalgo/macd_fno_portfolio_report.html
+✅ Text log written to: /Users/mac/Desktop/openalgo/macd_fno_backtest.txt
+✅ HTML report opened in browser: /Users/mac/Desktop/openalgo/macd_fno_portfolio_report.html

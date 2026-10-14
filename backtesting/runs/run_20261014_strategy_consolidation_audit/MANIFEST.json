@@ -1,0 +1,22 @@
+{
+  "run_id": "run_20261014_strategy_consolidation_audit",
+  "created_at": "2026-10-14T11:00:00+05:30",
+  "status": "COMPLETED_READ_ONLY",
+  "scope": "CONTROLLED_AWS_STRATEGY_CONSOLIDATION_AUDIT",
+  "input_targets": {
+    "nifty_covered_call": "strategies/scripts/nifty_covered_call_20261012110856.py",
+    "macdfno": "strategies/scripts/macdfno_20260902130041.py",
+    "emacrossopen": "strategies/scripts/emacrossopen_20260903110443.py",
+    "oifno": "strategies/scripts/oifno_20261013171056.py"
+  },
+  "generated_artifacts": {
+    "AWS_STRATEGY_CONSOLIDATION_AUDIT_20261014.md": "5f64e461f14302b1f0c42955dcacf7f235f3f9d52332d670b29308c555fb9b40",
+    "strategy_consolidation_checkpoint.json": "backtesting/reports/strategy_consolidation_checkpoint.json"
+  },
+  "governance_signoff": {
+    "read_only_strictly_enforced": true,
+    "zero_real_orders_placed": true,
+    "zero_processes_modified": true,
+    "zero_code_files_modified": true
+  }
+}

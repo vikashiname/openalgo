@@ -1,0 +1,57 @@
+{
+  "checkpoint_id": "checkpoint_20261014_forward_testing_preparation",
+  "timestamp": "2026-10-14T11:30:00+05:30",
+  "phase": "CONTROLLED_FORWARD_TESTING_PREPARATION",
+  "status": "PREPARED_AWAITING_AUTHORIZATION",
+  "source_of_truth": {
+    "audit_report": "backtesting/reports/AWS_STRATEGY_CONSOLIDATION_AUDIT_20261014.md",
+    "prior_checkpoint": "backtesting/reports/strategy_consolidation_checkpoint.json"
+  },
+  "verified_proposed_configuration": {
+    "nifty_covered_call": {
+      "mode": "ANALYZE",
+      "status": "MONITORING_ACTIVE",
+      "risk_status": "VULNERABILITY_IDENTIFIED_IN_PROD",
+      "proposal_doc": "backtesting/nifty_covered_call/PROPOSAL_FUTURES_RISK_CONTROL.md",
+      "test_suite": "backtesting/nifty_covered_call/test_futures_risk_control.py",
+      "tests_passed": "6/6"
+    },
+    "emacrossopen": {
+      "mode": "ANALYZE",
+      "status": "CONFIRMED_READY_WITH_CAP",
+      "max_active_limit_verified": true,
+      "max_active_limit": 3,
+      "client_side_safety_lock": "verify_paper_mode() active"
+    },
+    "macdfno": {
+      "mode": "ANALYZE",
+      "status": "ACTIVE_NOT_PAUSED_YET",
+      "safe_pause_plan_prepared": true,
+      "scheduler_aware_procedure": "strategy_configs.json manually_stopped=True"
+    },
+    "oifno": {
+      "mode": "SHADOW",
+      "status": "PRESERVED_PHASE7_RESTRICTIONS",
+      "live_trading_enabled": false
+    }
+  },
+  "verified_september_metrics": {
+    "total_trades": 491,
+    "intersecting_underlying_symbols": 47,
+    "same_second_trades": 0,
+    "day_over_day_whiplash_observed": true,
+    "peak_margin_inr": 6360179.03,
+    "realized_pnl_inr": 291019.51
+  },
+  "deliverables": [
+    "backtesting/reports/CONTROLLED_FORWARD_TESTING_PREPARATION_20261014.md",
+    "backtesting/nifty_covered_call/PROPOSAL_FUTURES_RISK_CONTROL.md",
+    "backtesting/nifty_covered_call/test_futures_risk_control.py"
+  ],
+  "safety_signoff": {
+    "aws_processes_mutated": false,
+    "production_files_modified": false,
+    "real_orders_submitted": false,
+    "stop_condition_met": true
+  }
+}

@@ -20,6 +20,9 @@ def _coerce_quantity_to_int(data):
 
 
 class OrderSchema(Schema):
+    class Meta:
+        unknown = EXCLUDE
+
     apikey = fields.Str(required=True, validate=validate.Length(min=1, max=256))
     strategy = fields.Str(required=True)
     exchange = fields.Str(required=True, validate=validate.OneOf(VALID_EXCHANGES))
@@ -46,6 +49,9 @@ class OrderSchema(Schema):
     underlying_ltp = fields.Float(
         missing=None, allow_none=True
     )  # Optional: passed from options order for execution reference
+    disable_telegram = fields.Bool(missing=False, allow_none=True)
+    skip_telegram = fields.Bool(missing=False, allow_none=True)
+    notify = fields.Bool(missing=True, allow_none=True)
 
     @post_load
     def coerce_quantity(self, data, **kwargs):
@@ -53,6 +59,9 @@ class OrderSchema(Schema):
 
 
 class SmartOrderSchema(Schema):
+    class Meta:
+        unknown = EXCLUDE
+
     apikey = fields.Str(required=True, validate=validate.Length(min=1, max=256))
     strategy = fields.Str(required=True)
     exchange = fields.Str(required=True, validate=validate.OneOf(VALID_EXCHANGES))
@@ -78,6 +87,9 @@ class SmartOrderSchema(Schema):
         missing=0,
         validate=validate.Range(min=0, error="Disclosed quantity must be a non-negative integer."),
     )
+    disable_telegram = fields.Bool(missing=False, allow_none=True)
+    skip_telegram = fields.Bool(missing=False, allow_none=True)
+    notify = fields.Bool(missing=True, allow_none=True)
 
     @post_load
     def coerce_quantity(self, data, **kwargs):

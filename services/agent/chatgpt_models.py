@@ -76,6 +76,64 @@ SUPPLEMENTAL: dict[str, dict[str, Any]] = {
     "gpt-6-astra": {"max_input_tokens": 922000},
 }
 
+#: Models confirmed available on upstream Codex with a ChatGPT subscription account.
+#: Measured against real subscriptions, returning content via /v1/responses.
+AVAILABLE_MODELS: frozenset[str] = frozenset(
+    {
+        "gpt-5.5",
+        "gpt-5.6-sol",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+    }
+)
+
+#: Models confirmed refused by upstream Codex with:
+#: "The '<model>' model is not supported when using Codex with a ChatGPT account."
+REFUSED_MODELS: frozenset[str] = frozenset(
+    {
+        "gpt-5.4",
+        "gpt-5.4-pro",
+        "gpt-5.6",
+        "gpt-5.6-cyber",
+        "gpt-5.5-pro",
+        "gpt-5.5-codex",
+        "gpt-5.6-codex",
+        "gpt-6",
+        "gpt-6-pro",
+        "gpt-6-astra-codex",
+    }
+)
+
+#: Safe model aliases: map refused models to their closest verified, working counterparts
+#: so existing configurations or operator shorthand gracefully run instead of hard-failing.
+CODEX_MODEL_ALIASES: dict[str, str] = {
+    "gpt-5.4": "gpt-5.5",
+    "gpt-5.4-pro": "gpt-5.5",
+    "gpt-5.6": "gpt-5.6-sol",
+    "gpt-6": "gpt-6-astra",
+}
+
+
+def normalize_subscription_model(model_name: str) -> str:
+    """Map a model identifier to a verified Codex-supported subscription model.
+
+    If given a known refused model (e.g. 'gpt-5.4'), maps it to the verified working
+    equivalent (e.g. 'gpt-5.5').
+    """
+    clean = (model_name or "").strip()
+    if not clean:
+        return ""
+    prefix = ""
+    lower = clean.lower()
+    if lower.startswith(f"{PROVIDER}/"):
+        prefix = f"{PROVIDER}/"
+        bare = clean[len(PROVIDER) + 1 :].strip()
+    else:
+        bare = clean
+    target = CODEX_MODEL_ALIASES.get(bare.lower(), bare)
+    return f"{prefix}{target}" if prefix else target
+
 
 def entry(name: str) -> dict[str, Any]:
     """Build the registry entry for one supplemental model.

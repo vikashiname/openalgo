@@ -219,6 +219,23 @@ def litellm_model_id(kind: str, model_name: str) -> str:
     name = (model_name or "").strip()
     if not name:
         raise ValueError("A model name is required")
+    if kind == "litellm":
+        lower = name.lower()
+        if (
+            lower.startswith("chatgpt/")
+            or lower.startswith("chatgpt ")
+            or lower.startswith("chatgpt:")
+        ):
+            for sep in ("/", " ", ":"):
+                if sep in name:
+                    prefix, _, remainder = name.partition(sep)
+                    if prefix.strip().lower() == "chatgpt":
+                        from services.agent.chatgpt_models import CODEX_MODEL_ALIASES
+
+                        sub = remainder.strip().lower()
+                        sub = CODEX_MODEL_ALIASES.get(sub, sub)
+                        return f"chatgpt/{sub}"
+        return name
     if not spec.prefix:
         return name
     if name.startswith(f"{spec.prefix}/"):

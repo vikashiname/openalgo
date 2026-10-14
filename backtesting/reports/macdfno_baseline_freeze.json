@@ -1,0 +1,29 @@
+{
+  "strategy_file": "/Users/mac/Desktop/openalgo/strategies/liveonopenalgo/macdfno.py",
+  "sha256_checksum": "312c25b8f882bdb2549ebc08a08ed88cd19f3a1989f6a986b6b98171a059c832",
+  "file_size_bytes": 67267,
+  "last_modified_timestamp": 1788337937.5290015,
+  "frozen_baseline_timestamp": "2026-09-02T16:50:00+05:30",
+  "historical_dataset": {
+    "source": "Yahoo Finance Continuous 1-Hour Adjusted Underlying",
+    "date_range": "2023-09-22 09:15:00 IST to 2026-09-02 15:15:00 IST",
+    "trading_days": 717,
+    "total_bars_evaluated": 75675,
+    "universe_count": 15,
+    "frozen_trade_count": 4007,
+    "trade_count_discrepancy_explanation": "Initial report recorded 4,006 trades using data up to 14:15 IST. The completion of the final 15:15 candle bar on 2026-09-02 added 1 closed trade on ULTRACEMCO, solidifying the final historical dataset at 4,007 trades. Baseline is strictly frozen at 4,007 trades."
+  },
+  "strategy_rules": {
+    "timeframe": "1-Hour completed candles only",
+    "indicators": {
+      "macd_fast": 12,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "histogram_expansion_bars": 2,
+      "ema_trend_filters": "Active as coded in macdfno.py"
+    },
+    "entry_conditions": "MACD Crossover + 2-Bar Histogram Expansion",
+    "exit_model_a_current": "Opposite MACD Crossover reversal only (No TP, No SL, No BE)",
+    "exit_model_b_proposed": "TP = +1.50%, SL = -1.50%, Break-Even = DISABLED, Fallback = MACD Reversal"
+  }
+}

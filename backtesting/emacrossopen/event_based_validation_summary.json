@@ -1,0 +1,198 @@
+{
+  "event_threshold_passed": true,
+  "long_target_events_count": 441,
+  "short_target_events_count": 509,
+  "all_promotion_gates_passed": true,
+  "gates": {
+    "G1_LONG_incremental_alpha": {
+      "passed": true,
+      "actual": "+194.60%"
+    },
+    "G2_LONG_profit_factor": {
+      "passed": true,
+      "actual": "1.197 vs 1.057"
+    },
+    "G3_LONG_expectancy": {
+      "passed": true,
+      "actual": "+0.2245% vs +0.0646%"
+    },
+    "G4_drawdown_containment": {
+      "passed": true,
+      "actual": "53.84% vs 83.88%"
+    },
+    "G5_average_giveback": {
+      "passed": true,
+      "actual": "0.517% (Target <= 0.75%)"
+    },
+    "G6_tail_loss_protection": {
+      "passed": true,
+      "actual": "Hard -10.0% SL Verified"
+    },
+    "G7_parameter_plateau": {
+      "passed": true,
+      "actual": "Positive across all 0.35% - 0.75% sweeps"
+    },
+    "G8_short_fixed_integrity": {
+      "passed": true,
+      "actual": "Identical Fixed Target (+1.50%)"
+    }
+  },
+  "overall_stats": {
+    "event_count": 2143,
+    "target_touch_count": 950,
+    "runner_activation_count": 441,
+    "control_baseline": {
+      "win_rate_pct": 53.99,
+      "profit_factor": 0.997,
+      "net_return_pct": -5.77,
+      "expectancy_pct": -0.0027,
+      "avg_profit_pct": 1.902,
+      "avg_loss_pct": -2.237,
+      "max_drawdown_pct": 145.16
+    },
+    "candidate_runner": {
+      "win_rate_pct": 53.99,
+      "profit_factor": 1.086,
+      "net_return_pct": 188.83,
+      "expectancy_pct": 0.0881,
+      "avg_profit_pct": 2.07,
+      "avg_loss_pct": -2.237,
+      "max_drawdown_pct": 96.34
+    },
+    "incremental_net_alpha_pct": 194.6,
+    "average_giveback_pct": 0.517,
+    "median_giveback_pct": 0.518,
+    "max_giveback_pct": 0.561,
+    "runners_beat_fixed_count": 249,
+    "runners_underperformed_fixed_count": 192,
+    "runners_neutral_count": 1702,
+    "runner_win_conversion_rate_pct": 26.21
+  },
+  "long_stats": {
+    "event_count": 1217,
+    "target_touch_count": 441,
+    "runner_activation_count": 441,
+    "control_baseline": {
+      "win_rate_pct": 51.11,
+      "profit_factor": 1.057,
+      "net_return_pct": 78.67,
+      "expectancy_pct": 0.0646,
+      "avg_profit_pct": 2.352,
+      "avg_loss_pct": -2.327,
+      "max_drawdown_pct": 83.88
+    },
+    "candidate_runner": {
+      "win_rate_pct": 51.11,
+      "profit_factor": 1.197,
+      "net_return_pct": 273.27,
+      "expectancy_pct": 0.2245,
+      "avg_profit_pct": 2.665,
+      "avg_loss_pct": -2.327,
+      "max_drawdown_pct": 53.84
+    },
+    "incremental_net_alpha_pct": 194.6,
+    "average_giveback_pct": 0.517,
+    "median_giveback_pct": 0.518,
+    "max_giveback_pct": 0.561,
+    "runners_beat_fixed_count": 249,
+    "runners_underperformed_fixed_count": 192,
+    "runners_neutral_count": 776,
+    "runner_win_conversion_rate_pct": 56.46
+  },
+  "short_stats": {
+    "event_count": 926,
+    "target_touch_count": 509,
+    "runner_activation_count": 0,
+    "control_baseline": {
+      "win_rate_pct": 57.78,
+      "profit_factor": 0.897,
+      "net_return_pct": -84.45,
+      "expectancy_pct": -0.0912,
+      "avg_profit_pct": 1.378,
+      "avg_loss_pct": -2.101,
+      "max_drawdown_pct": 121.5
+    },
+    "candidate_runner": {
+      "win_rate_pct": 57.78,
+      "profit_factor": 0.897,
+      "net_return_pct": -84.45,
+      "expectancy_pct": -0.0912,
+      "avg_profit_pct": 1.378,
+      "avg_loss_pct": -2.101,
+      "max_drawdown_pct": 121.5
+    },
+    "incremental_net_alpha_pct": 0.0,
+    "average_giveback_pct": 0.0,
+    "median_giveback_pct": 0.0,
+    "max_giveback_pct": 0.0,
+    "runners_beat_fixed_count": 0,
+    "runners_underperformed_fixed_count": 0,
+    "runners_neutral_count": 926,
+    "runner_win_conversion_rate_pct": 0.0
+  },
+  "robustness_plateau": [
+    {
+      "trail_distance_pct": 0.35,
+      "long_net_return_pct": 321.57,
+      "long_profit_factor": 1.232,
+      "long_expectancy_pct": 0.2642,
+      "long_max_dd_pct": 53.37,
+      "incremental_alpha_pct": 242.9,
+      "avg_giveback_pct": 0.362
+    },
+    {
+      "trail_distance_pct": 0.4,
+      "long_net_return_pct": 301.3,
+      "long_profit_factor": 1.218,
+      "long_expectancy_pct": 0.2476,
+      "long_max_dd_pct": 53.52,
+      "incremental_alpha_pct": 222.63,
+      "avg_giveback_pct": 0.413
+    },
+    {
+      "trail_distance_pct": 0.45,
+      "long_net_return_pct": 284.06,
+      "long_profit_factor": 1.205,
+      "long_expectancy_pct": 0.2334,
+      "long_max_dd_pct": 53.68,
+      "incremental_alpha_pct": 205.38,
+      "avg_giveback_pct": 0.465
+    },
+    {
+      "trail_distance_pct": 0.5,
+      "long_net_return_pct": 273.27,
+      "long_profit_factor": 1.197,
+      "long_expectancy_pct": 0.2245,
+      "long_max_dd_pct": 53.84,
+      "incremental_alpha_pct": 194.6,
+      "avg_giveback_pct": 0.517
+    },
+    {
+      "trail_distance_pct": 0.55,
+      "long_net_return_pct": 257.36,
+      "long_profit_factor": 1.186,
+      "long_expectancy_pct": 0.2115,
+      "long_max_dd_pct": 54.2,
+      "incremental_alpha_pct": 178.69,
+      "avg_giveback_pct": 0.568
+    },
+    {
+      "trail_distance_pct": 0.6,
+      "long_net_return_pct": 243.86,
+      "long_profit_factor": 1.176,
+      "long_expectancy_pct": 0.2004,
+      "long_max_dd_pct": 54.65,
+      "incremental_alpha_pct": 165.19,
+      "avg_giveback_pct": 0.619
+    },
+    {
+      "trail_distance_pct": 0.75,
+      "long_net_return_pct": 215.77,
+      "long_profit_factor": 1.156,
+      "long_expectancy_pct": 0.1773,
+      "long_max_dd_pct": 57.27,
+      "incremental_alpha_pct": 137.1,
+      "avg_giveback_pct": 0.773
+    }
+  ]
+}

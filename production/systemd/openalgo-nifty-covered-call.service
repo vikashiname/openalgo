@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenAlgo NIFTY Covered Call Live & Paper Trading Engine
+After=network.target openalgo.service
+Wants=openalgo.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fyersawsog
+Environment=PYTHONUNBUFFERED=1
+Environment=HEARTBEAT_FILE=/home/ubuntu/fyersawsog/strategies/liveonopenalgo/nifty_covered_call_heartbeat.json
+Environment=STATE_FILE=/home/ubuntu/fyersawsog/strategies/liveonopenalgo/nifty_covered_call_state.json
+Environment=LOG_FILE=/home/ubuntu/fyersawsog/log/strategies/nifty_covered_call.log
+ExecStart=/home/ubuntu/fyersawsog/.venv/bin/python strategies/liveonopenalgo/nifty_covered_call.py
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

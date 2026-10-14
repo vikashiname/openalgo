@@ -1,0 +1,37 @@
+{
+  "strategy": "OIFNO_V1",
+  "contract_version": "SIG-OI-001-PAPER-V1",
+  "strategy_hash": "dc1063b1ccadd2e513c6d3f71a8a2f4f13465db852387204c0b27137249ed917",
+  "phase7_mode": "SHADOW",
+  "last_saved_at": "2026-10-13T17:53:09.183909",
+  "executed_signal_ids": [
+    "sig_recovery_123"
+  ],
+  "candidates_day_t": [],
+  "order_intents": {},
+  "tracked_positions": {
+    "RELIANCE": {
+      "symbol": "RELIANCE",
+      "quantity": 500
+    }
+  },
+  "execution_history": [],
+  "risk_state": {
+    "initial_capital": 10000000.0,
+    "current_capital": 10000000.0,
+    "high_watermark": 10000000.0,
+    "current_drawdown_pct": 0.0,
+    "circuit_breaker_tripped": false,
+    "circuit_breaker_reason": ""
+  },
+  "last_reconciliation_audit": {
+    "timestamp": "2026-10-13T17:53:08.514099",
+    "openalgo_connectivity": true,
+    "broker_identity": "fyers",
+    "openalgo_mode": "analyze",
+    "real_broker_orders_found": 0,
+    "tracked_shadow_positions": 1,
+    "discrepancies": [],
+    "status": "PASS"
+  }
+}

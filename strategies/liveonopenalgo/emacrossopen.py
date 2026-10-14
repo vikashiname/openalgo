@@ -1,7 +1,23 @@
 """
 ================================================================================
-NFO 1H EMA (9/26) + MACD (12/26/9) Asymmetric V2-2 Sequential Confirmation Engine
-File: strategies/liveonopenalgo/emacrossopen.py
+OPENALGO LIVE STRATEGY: NFO 1H EMA/MACD ASYMMETRIC SEQUENTIAL CONFIRMATION ENGINE
+================================================================================
+File Role            : LIVE_OPENALGO
+Strategy Identifier  : EMACROSS_FNO_PAPER (Candidate EXP_I Champion Architecture)
+Current Version      : 3.1.0
+Last Modified        : 2026-10-12
+Production Approval  : SHADOW / PAPER TRADING ONLY (Phase 7 Governance)
+
+Implementation History:
+  - 2026-10-12 [v3.1.0]: Candidate EXP_I Baseline Deployment:
+      * Asymmetric Universe Whitelist (TOP_LONGS: 7, TOP_SHORTS: 6).
+      * 1H Trend Regime Filter (Close > EMA26 for Longs, Close < EMA26 for Shorts).
+      * Lookahead-Free Conservative 0.35% HWM Trailing Runner.
+      * Isolated temporary state generator in test harness (39/39 tests passed).
+      * Order pacing delay (0.25s) and SQLite retry exponential backoff.
+  - 2026-10-12 [v3.0.2]: Added SQLite lock exponential backoff and order pacing delay (0.25s).
+  - 2026-10-10 [v3.0.1]: Alert deduplication with OpenAlgo subscriber; position reconciliation.
+  - 2026-10-04 [v3.0.0]: AutoResearch V3.0 baseline (EMA 10/28, Asymmetric Universe, 3.0%/1.5% TP, 6.0% SL).
 ================================================================================
 Strategy Specification:
   1. Timeframe: Strictly 1-Hour (1H) for both EMA and MACD on completed candles.
@@ -48,7 +64,7 @@ Strategy Specification:
      - Full idempotency across process restarts (Candle timestamp + Symbol + Direction).
      - Atomic crash-safe state persistence, startup position reconciliation,
        and independent watchdog heartbeat.
-     - Complete 218 F&O instrument universe.
+     - Complete active NFO instrument universe.
 ================================================================================
 """
 
@@ -106,10 +122,11 @@ except ImportError:
 # 1. FILE PATHS & CONSTANTS
 # ==============================================================================
 SCRIPT_DIR = Path(__file__).resolve().parent
-LOG_FILE_PATH = Path(os.getenv("LOG_FILE", SCRIPT_DIR / "emacrossopen.log"))
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+LOG_FILE_PATH = Path(os.getenv("LOG_FILE", PROJECT_ROOT / "log/strategies/emacrossopen.log" if (PROJECT_ROOT / "log").exists() else SCRIPT_DIR / "emacrossopen.log"))
 STATE_FILE_PATH = Path(os.getenv("STATE_FILE", SCRIPT_DIR / "emacrossopen_state.json"))
-HEARTBEAT_FILE_PATH = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "heartbeat.json"))
-RESEARCH_CSV_PATH = Path(os.getenv("RESEARCH_CSV_FILE", SCRIPT_DIR / "emacrossopen_research.csv"))
+HEARTBEAT_FILE_PATH = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "emacross_heartbeat.json"))
+RESEARCH_CSV_PATH = Path(os.getenv("RESEARCH_CSV_FILE", PROJECT_ROOT / "backtesting/emacrossopen/emacrossopen_research.csv" if (PROJECT_ROOT / "backtesting/emacrossopen").exists() else SCRIPT_DIR / "emacrossopen_research.csv"))
 
 STRATEGY_NAME = os.getenv("STRATEGY_NAME", "EMACROSS_FNO_PAPER")
 EXCHANGE = os.getenv("EXCHANGE", "NFO")
@@ -131,6 +148,12 @@ USE_ASYMMETRIC_UNIVERSE = os.getenv("USE_ASYMMETRIC_UNIVERSE", "true").lower() i
 LONG_PROFIT_TARGET_PCT = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.00"))
 SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
 CATASTROPHE_SL_PCT = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
+ORDER_PACING_DELAY_SEC = float(os.getenv("ORDER_PACING_DELAY_SEC", "0.25"))
+
+# Target-to-Runner Optimization Parameters (Champion Research Architecture)
+ENABLE_TRAILING_RUNNER = os.getenv("ENABLE_TRAILING_RUNNER", "true").lower() in ["true", "1", "yes"]
+RUNNER_TRAIL_PCT = float(os.getenv("RUNNER_TRAIL_PCT", "0.35"))  # 0.35% High-Water-Mark pullback trail
+RUNNER_TRAIL_MODE = os.getenv("RUNNER_TRAIL_MODE", "HWM").upper()  # "HWM" or "FIXED"
 
 LOTS = int(os.getenv("LOTS", "1"))
 MAX_ACTIVE_POSITIONS = int(os.getenv("MAX_ACTIVE_POSITIONS", "0"))  # 0 = Unlimited (no risk gate cap)
@@ -225,7 +248,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         pass
 
 # ==============================================================================
-# 4. BROAD F&O UNIVERSE (218 Active NFO Instruments)
+# 4. BROAD F&O UNIVERSE (211 Active NFO Instruments)
 # ==============================================================================
 DEFAULT_NFO_UNIVERSE = [
     "360ONE", "ABB", "ABCAPITAL", "ADANIENSOL", "ADANIENT", "ADANIGREEN", "ADANIPORTS", "ADANIPOWER",
@@ -234,11 +257,11 @@ DEFAULT_NFO_UNIVERSE = [
     "BANDHANBNK", "BANKBARODA", "BANKINDIA", "BANKNIFTY", "BDL", "BEL", "BHARATFORG", "BHARTIARTL",
     "BHEL", "BIOCON", "BLUESTARCO", "BOSCHLTD", "BPCL", "BRITANNIA", "BSE", "CAMS",
     "CANBK", "CDSL", "CGPOWER", "CHOLAFIN", "CIPLA", "COALINDIA", "COCHINSHIP", "COFORGE",
-    "COLPAL", "CONCOR", "CROMPTON", "CUMMINSIND", "DABUR", "DALBHARAT", "DELHIVERY", "DIVISLAB",
-    "DIXON", "DLF", "DMART", "DRREDDY", "EICHERMOT", "ETERNAL", "EXIDEIND", "FEDERALBNK",
+    "COLPAL", "CONCOR", "CROMPTON", "CUMMINSIND", "DABUR", "DELHIVERY", "DIVISLAB",
+    "DIXON", "DLF", "DMART", "DRREDDY", "EICHERMOT", "ETERNAL", "FEDERALBNK",
     "FINNIFTY", "FORCEMOT", "FORTIS", "GAIL", "GLENMARK", "GMRAIRPORT", "GODFRYPHLP", "GODREJCP",
     "GODREJPROP", "GRASIM", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
-    "HEROMOTOCO", "HINDALCO", "HINDPETRO", "HINDUNILVR", "HINDZINC", "HUDCO", "HYUNDAI", "ICICIBANK",
+    "HEROMOTOCO", "HINDALCO", "HINDPETRO", "HINDUNILVR", "HINDZINC", "HYUNDAI", "ICICIBANK",
     "ICICIGI", "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "INDHOTEL", "INDIANB", "INDIGO",
     "INDUSINDBK", "INDUSTOWER", "INFY", "INOXWIND", "IOC", "IREDA", "IRFC", "ITC",
     "JINDALSTEL", "JIOFIN", "JSWENERGY", "JSWSTEEL", "JUBLFOOD", "KALYANKJIL", "KAYNES", "KEI",
@@ -246,14 +269,14 @@ DEFAULT_NFO_UNIVERSE = [
     "LTF", "LTM", "LUPIN", "M&M", "MANAPPURAM", "MANKIND", "MARICO", "MARUTI",
     "MAXHEALTH", "MAZDOCK", "MCX", "MFSL", "MIDCPNIFTY", "MOTHERSON", "MOTILALOFS", "MPHASIS",
     "MUTHOOTFIN", "NAM-INDIA", "NATIONALUM", "NAUKRI", "NBCC", "NESTLEIND", "NHPC", "NIFTY",
-    "NIFTYNXT50", "NMDC", "NTPC", "NUVAMA", "NYKAA", "OBEROIRLTY", "OFSS", "OIL",
+    "NIFTYNXT50", "NMDC", "NTPC", "NYKAA", "OBEROIRLTY", "OFSS", "OIL",
     "ONGC", "PAGEIND", "PATANJALI", "PAYTM", "PERSISTENT", "PETRONET", "PFC", "PGEL",
     "PHOENIXLTD", "PIDILITIND", "PIIND", "PNB", "PNBHOUSING", "POLICYBZR", "POLYCAB", "POWERGRID",
-    "POWERINDIA", "PPLPHARMA", "PREMIERENE", "PRESTIGE", "RBLBANK", "RECLTD", "RELIANCE", "RVNL",
-    "SAIL", "SAMMAANCAP", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN", "SIEMENS",
+    "POWERINDIA", "PREMIERENE", "PRESTIGE", "RBLBANK", "RECLTD", "RELIANCE", "RVNL",
+    "SAGILITY", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN", "SIEMENS",
     "SOLARINDS", "SONACOMS", "SRF", "SUNPHARMA", "SUPREMEIND", "SUZLON", "SWIGGY", "TATACONSUM",
-    "TATAELXSI", "TATAPOWER", "TATASTEEL", "TATATECH", "TCS", "TECHM", "TIINDIA", "TITAN",
-    "TMPV", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "ULTRACEMCO", "UNIONBANK", "UNITDSPR",
+    "TATAELXSI", "TATAPOWER", "TATASTEEL", "TCS", "TECHM", "TIINDIA", "TITAN",
+    "TMPV", "TORNTPHARM", "TRENT", "TVSMOTOR", "ULTRACEMCO", "UNIONBANK", "UNITDSPR",
     "UNOMINDA", "UPL", "VBL", "VEDL", "VMM", "VOLTAS", "WAAREEENER", "WIPRO",
     "YESBANK", "ZYDUSLIFE"
 ]
@@ -263,11 +286,11 @@ INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"}
 # Asymmetric Universe Segregation (AutoResearch Champion V3.0)
 TOP_LONGS = {
     "SUNPHARMA", "BAJAJ-AUTO", "BPCL", "WIPRO", "TATASTEEL",
-    "BAJFINANCE", "NTPC", "POWERGRID", "M&M"
+    "BAJFINANCE", "NTPC"
 }
 TOP_SHORTS = {
     "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC",
-    "NIFTY", "BANKNIFTY"
+    "NIFTY"
 }
 BLACKLIST_AVOID = {
     "ITC", "ONGC", "ADANIENT", "DRREDDY", "INFY"
@@ -310,7 +333,7 @@ FALLBACK_LOT_SIZES = {
     "PHOENIXLTD": 350, "PIDILITIND": 500, "PIIND": 175, "PNB": 8000, "PNBHOUSING": 650,
     "POLICYBZR": 350, "POLYCAB": 125, "POWERGRID": 1900, "POWERINDIA": 50, "PPLPHARMA": 2625,
     "PREMIERENE": 575, "PRESTIGE": 450, "RBLBANK": 3175, "RECLTD": 1400, "RELIANCE": 500,
-    "RVNL": 1525, "SAIL": 4700, "SAMMAANCAP": 4300, "SBICARD": 800, "SBILIFE": 375,
+    "RVNL": 1525, "SAGILITY": 12000, "SAIL": 4700, "SAMMAANCAP": 4300, "SBICARD": 800, "SBILIFE": 375,
     "SBIN": 750, "SHREECEM": 25, "SHRIRAMFIN": 825, "SIEMENS": 175, "SOLARINDS": 50,
     "SONACOMS": 1225, "SRF": 200, "SUNPHARMA": 350, "SUPREMEIND": 175, "SUZLON": 9025,
     "SWIGGY": 1300, "TATACONSUM": 550, "TATAELXSI": 100, "TATAPOWER": 1450, "TATASTEEL": 5500,
@@ -525,17 +548,33 @@ class PersistentStateManager:
     def load_state(self) -> Dict[str, Any]:
         """Safely loads state from disk with corrupt-file recovery."""
         if not self.state_file.exists():
-            return self._default_state()
+            default = self._default_state()
+            self._write_fresh_state(default)
+            return default
         try:
             with open(self.state_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and "version" in data:
                     return data
                 logger.warning(f"⚠️ State file {self.state_file} has invalid format. Resetting to default.")
-                return self._default_state()
+                default = self._default_state()
+                self._write_fresh_state(default)
+                return default
         except Exception as e:
             logger.error(f"❌ Error loading state file {self.state_file}: {e}. Initializing fresh state.")
-            return self._default_state()
+            default = self._default_state()
+            self._write_fresh_state(default)
+            return default
+
+    def _write_fresh_state(self, state_data: Dict[str, Any]):
+        """Helper to write initial/recovered state safely."""
+        try:
+            temp_file = self.state_file.with_suffix(f".tmp.{os.getpid()}")
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(state_data, f, indent=2, default=str)
+            temp_file.replace(self.state_file)
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize clean state file {self.state_file}: {e}")
 
     def _default_state(self) -> Dict[str, Any]:
         return {
@@ -556,7 +595,7 @@ class PersistentStateManager:
         """Atomic write: writes to temp file then atomic rename to prevent corruption on crash."""
         try:
             self.state["last_saved_at"] = get_current_ist().isoformat()
-            temp_file = self.state_file.with_suffix(".tmp")
+            temp_file = self.state_file.with_suffix(f".tmp.{os.getpid()}")
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(self.state, f, indent=2, default=str)
             temp_file.replace(self.state_file)
@@ -908,6 +947,9 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
     if exit_reason == "TARGET_HIT":
         reason_header = "🎯 TARGET HIT"
         reason_badge = "🎯 <b>TARGET REACHED</b>"
+    elif exit_reason == "RUNNER_HWM_TRAIL":
+        reason_header = "🏃 RUNNER TRAIL HIT"
+        reason_badge = "🏃 <b>HIGH-WATER-MARK TRAILING STOP TRIGGERED</b>"
     elif exit_reason == "CATASTROPHE_SL":
         reason_header = "🛑 CATASTROPHE STOP-LOSS"
         reason_badge = "🛑 <b>EMERGENCY STOP LOSS TRIGGERED</b>"
@@ -980,13 +1022,16 @@ def resolve_nfo_contract(
             for item in fut_items:
                 exp_str = item.get("expiry")
                 if exp_str:
-                    try:
-                        exp_dt = datetime.strptime(exp_str, "%d-%b-%y").replace(hour=23, minute=59)
-                        if exp_dt >= now:
-                            lot = int(item.get("lotsize", fallback_lot))
-                            valid.append((exp_dt, item.get("symbol"), lot))
-                    except Exception:
-                        pass
+                    exp_dt = None
+                    for fmt in ("%d-%b-%y", "%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d-%B-%y"):
+                        try:
+                            exp_dt = datetime.strptime(exp_str, fmt).replace(hour=23, minute=59)
+                            break
+                        except Exception:
+                            pass
+                    if exp_dt and exp_dt >= now:
+                        lot = int(item.get("lotsize", fallback_lot))
+                        valid.append((exp_dt, item.get("symbol"), lot))
 
             if valid:
                 valid.sort(key=lambda x: x[0])
@@ -998,7 +1043,7 @@ def resolve_nfo_contract(
     except Exception as e:
         logger.error(f"❌ Search API lookup error for {symbol}: {e}")
 
-    logger.error(f"❌ Failed to dynamically resolve active NFO contract for {symbol}. Symbol will be skipped.")
+    logger.info(f"ℹ️ Unable to dynamically resolve active NFO contract for {symbol}. Symbol will be skipped.")
     return None, None, None
 
 
@@ -1417,6 +1462,7 @@ class EMACrossPaperTradingEngine:
         host: str = OPENALGO_HOST,
         api_key: str = OPENALGO_API_KEY,
         use_asymmetric_universe: Optional[bool] = None,
+        state_file: Optional[Path] = None,
     ):
         self.symbols = symbols or DEFAULT_NFO_UNIVERSE
         self.lots = lots
@@ -1428,6 +1474,7 @@ class EMACrossPaperTradingEngine:
             if use_asymmetric_universe is not None
             else USE_ASYMMETRIC_UNIVERSE
         )
+        self.state_file_path = state_file or STATE_FILE_PATH
         self.running = True
         self.parallel_fetch = os.getenv("PARALLEL_DATA_FETCH", "1").lower() in ("1", "true", "yes")
         self.max_workers = int(os.getenv("MAX_WORKERS", "8"))
@@ -1436,6 +1483,9 @@ class EMACrossPaperTradingEngine:
         self.enable_time_filter = ENABLE_TIME_FILTER
         self.enable_regime_filter = ENABLE_REGIME_FILTER
         self.index_lot_multiplier = INDEX_LOT_MULTIPLIER
+        self.enable_trailing_runner = ENABLE_TRAILING_RUNNER
+        self.runner_trail_pct = RUNNER_TRAIL_PCT
+        self.runner_trail_mode = RUNNER_TRAIL_MODE
 
         # Connection-pooled HTTP session for efficient fallback data fetching
         self.session = requests.Session()
@@ -1464,7 +1514,7 @@ class EMACrossPaperTradingEngine:
                 logger.warning(f"Failed to initialize OpenAlgo client SDK: {e}")
 
         # State Manager
-        self.state_manager = PersistentStateManager(STATE_FILE_PATH)
+        self.state_manager = PersistentStateManager(self.state_file_path)
         self.contract_cache: Dict[str, Dict[str, Any]] = {}
 
         # Mode Safety Flag
@@ -1604,7 +1654,7 @@ class EMACrossPaperTradingEngine:
                 "last_completed_candle": str(self.state_manager.state.get("last_processed_candles", {})),
                 "details": details or {},
             }
-            temp_hb = HEARTBEAT_FILE_PATH.with_suffix(".tmp")
+            temp_hb = HEARTBEAT_FILE_PATH.with_suffix(f".tmp.{os.getpid()}")
             with open(temp_hb, "w", encoding="utf-8") as f:
                 json.dump(hb_data, f, indent=2)
             temp_hb.replace(HEARTBEAT_FILE_PATH)
@@ -1657,6 +1707,16 @@ class EMACrossPaperTradingEngine:
             pnl = float(p.get("pnl", 0.0))
 
             if qty == 0:
+                continue
+
+            # 1. Skip non-futures contracts (e.g. Options CE/PE from option strategies like Covered Call)
+            if contract_sym.endswith("CE") or contract_sym.endswith("PE"):
+                logger.info(f"  ℹ️ [EXTERNAL/OPTION] Skipping {contract_sym} (Options contract not traded by EMACROSS).")
+                continue
+
+            # 2. Skip positions not originated by this strategy
+            if contract_sym not in local_tracked:
+                logger.info(f"  ℹ️ [EXTERNAL POSITION] Skipping {contract_sym} (not in EMACROSS tracked_positions).")
                 continue
 
             pos_dir = "LONG" if qty > 0 else "SHORT"
@@ -1817,22 +1877,25 @@ class EMACrossPaperTradingEngine:
                         lot = int(item.get("lotsize", 1))
                         if not exp_str:
                             continue
-                        try:
-                            exp_dt = datetime.strptime(exp_str, "%d-%b-%y").replace(hour=23, minute=59)
-                            if exp_dt >= now:
-                                parts = name.rsplit(" ", 4)
-                                base = " ".join(parts[:-4]) if len(parts) >= 5 else name.split()[0]
-                                if base in unresolved:
-                                    curr = self.contract_cache.get(base)
-                                    if not curr or (curr.get("expiry_dt") and exp_dt < curr["expiry_dt"]):
-                                        self.contract_cache[base] = {
-                                            "contract": sym,
-                                            "lot_size": lot,
-                                            "order_qty": self.lots * lot,
-                                            "expiry_dt": exp_dt,
-                                        }
-                        except Exception:
-                            pass
+                        exp_dt = None
+                        for fmt in ("%d-%b-%y", "%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d-%B-%y"):
+                            try:
+                                exp_dt = datetime.strptime(exp_str, fmt).replace(hour=23, minute=59)
+                                break
+                            except Exception:
+                                pass
+                        if exp_dt and exp_dt >= now:
+                            parts = name.rsplit(" ", 4)
+                            base = " ".join(parts[:-4]) if len(parts) >= 5 else name.split()[0]
+                            if base in unresolved:
+                                curr = self.contract_cache.get(base)
+                                if not curr or (curr.get("expiry_dt") and exp_dt < curr["expiry_dt"]):
+                                    self.contract_cache[base] = {
+                                        "contract": sym,
+                                        "lot_size": lot,
+                                        "order_qty": self.lots * lot,
+                                        "expiry_dt": exp_dt,
+                                    }
             except Exception as e:
                 logger.warning(f"⚠️ Bulk contract search warning: {e}")
 
@@ -1856,7 +1919,23 @@ class EMACrossPaperTradingEngine:
                         "expiry_dt": exp_dt,
                     }
                 else:
-                    self.contract_cache.pop(s, None)
+                    self.contract_cache[s] = {
+                        "contract": None,
+                        "lot_size": None,
+                        "order_qty": 0,
+                        "expiry_dt": now + timedelta(hours=24),
+                        "unresolvable": True,
+                    }
+                    logger.info(f"ℹ️ Unable to resolve active NFO contract for {s} (non-F&O). Marked unresolvable.")
+
+        # Auto-prune unresolvable non-F&O symbols from active scanning universe
+        unresolvable = [s for s in self.symbols if self.contract_cache.get(s, {}).get("unresolvable")]
+        if unresolvable:
+            self.symbols = [s for s in self.symbols if s not in unresolvable]
+            logger.info(
+                f"ℹ️ Auto-pruned {len(unresolvable)} non-F&O instrument(s) from active scan: {sorted(unresolvable)}. "
+                f"Active trading universe: {len(self.symbols)} instruments."
+            )
 
     def fetch_1h_candles(self, symbol: str, contract_symbol: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
@@ -2045,6 +2124,7 @@ class EMACrossPaperTradingEngine:
         action: str,
         quantity: int,
         candle_time: Any = None,
+        reference_price: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Resilient Paper Order Placement Engine with Pre-Flight Safety & Idempotency.
@@ -2084,6 +2164,10 @@ class EMACrossPaperTradingEngine:
         attempt = 0
         resp = None
 
+        order_kwargs: Dict[str, Any] = {}
+        if reference_price is not None and float(reference_price) > 0:
+            order_kwargs["price"] = float(reference_price)
+
         while attempt < max_attempts:
             attempt += 1
             try:
@@ -2096,6 +2180,7 @@ class EMACrossPaperTradingEngine:
                         price_type="MARKET",
                         product=PRODUCT,
                         quantity=quantity,
+                        **order_kwargs,
                     )
                 else:
                     order_url = f"{self.host.rstrip('/')}/api/v1/placeorder"
@@ -2108,6 +2193,7 @@ class EMACrossPaperTradingEngine:
                         "price_type": "MARKET",
                         "product": PRODUCT,
                         "quantity": quantity,
+                        **order_kwargs,
                     }
                     r = requests.post(order_url, json=payload, timeout=8)
                     resp = r.json() if r.status_code == 200 else {"status": "error", "message": r.text}
@@ -2138,6 +2224,11 @@ class EMACrossPaperTradingEngine:
                         logger.error(f"❌ [RMS REJECTION] {contract_symbol}: {resp.get('message')}.")
                         self.state_manager.mark_order_resolved(order_key, "REJECTED")
                         return None
+                    elif "sqlite" in msg or "database is locked" in msg or "timeout" in msg or "timed out" in msg:
+                        logger.warning(
+                            f"⚠️ [DATABASE LOCK / TIMEOUT] {contract_symbol}: {resp.get('message')}. Backing off {1.0 * attempt}s before retry..."
+                        )
+                        time.sleep(1.0 * attempt)
                     else:
                         logger.warning(f"⚠️ [TRANSIENT RESPONSE] {contract_symbol}: {resp}")
 
@@ -2155,6 +2246,8 @@ class EMACrossPaperTradingEngine:
                     logger.info(f"✅ [ORDER FOUND IN BOOK] Order {order_id} exists ({order_status}). No retry needed.")
                     self.state_manager.mark_order_resolved(order_key, "FILLED", order_id)
                     self.paper_orders_placed += 1
+                    if ORDER_PACING_DELAY_SEC > 0:
+                        time.sleep(ORDER_PACING_DELAY_SEC)
                     return {"status": "success", "orderid": order_id, "verified_via": "orderbook"}
                 else:
                     logger.info(f"ℹ️ Order not found in book. Retrying attempt {attempt + 1}/{max_attempts}...")
@@ -2164,6 +2257,8 @@ class EMACrossPaperTradingEngine:
         send_telegram_alert(
             f"⚠️ <b>PAPER ORDER UNCERTAIN:</b> {contract_symbol} {action} {quantity} units unconfirmed."
         )
+        if ORDER_PACING_DELAY_SEC > 0:
+            time.sleep(ORDER_PACING_DELAY_SEC)
         return None
 
     def get_order_fill_price(
@@ -2375,6 +2470,11 @@ class EMACrossPaperTradingEngine:
         target_exit_px = 0.0
         sl_exit_px = 0.0
 
+        # Retrieve runner state for this position (if any)
+        runner_active = bool(pos_info.get("runner_active", False))
+        peak_price = float(pos_info.get("peak_price", entry_price))
+        trough_price = float(pos_info.get("trough_price", entry_price))
+
         if direction == "LONG":
             target_hit = candle_high >= long_target_px
             catastrophe_hit = candle_low <= long_catastrophe_px
@@ -2388,19 +2488,74 @@ class EMACrossPaperTradingEngine:
         else:
             return False
 
-        if not target_hit and not catastrophe_hit:
-            return False
+        # 1. Catastrophe SL has ultimate precedence
+        if catastrophe_hit:
+            exit_reason = "CATASTROPHE_SL"
+            expected_exit_px = sl_exit_px
 
-        # Precedence: Catastrophe SL takes priority over Target if both hit in the same candle
-        if catastrophe_hit and target_hit:
-            exit_reason = "CATASTROPHE_SL"
-            expected_exit_px = sl_exit_px
+        # 2. If runner is already active, evaluate HWM trailing stop
+        elif runner_active and getattr(self, "enable_trailing_runner", True):
+            trail_pct = getattr(self, "runner_trail_pct", RUNNER_TRAIL_PCT)
+            if direction == "LONG":
+                peak_price = max(peak_price, candle_high)
+                pos_info["peak_price"] = peak_price
+                effective_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
+                if candle_low <= effective_trail_sl:
+                    exit_reason = "RUNNER_HWM_TRAIL"
+                    expected_exit_px = round(effective_trail_sl, 2)
+                else:
+                    # Trailing continues; update high-water-mark in state and do not exit
+                    self.state_manager.update_tracked_positions(tracked_positions)
+                    return False
+            else:  # SHORT
+                trough_price = min(trough_price, candle_low)
+                pos_info["trough_price"] = trough_price
+                effective_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
+                if candle_high >= effective_trail_sl:
+                    exit_reason = "RUNNER_HWM_TRAIL"
+                    expected_exit_px = round(effective_trail_sl, 2)
+                else:
+                    # Trailing continues; update low-water-mark in state and do not exit
+                    self.state_manager.update_tracked_positions(tracked_positions)
+                    return False
+
+        # 3. Target Hit reached for the first time
         elif target_hit:
-            exit_reason = "TARGET_HIT"
-            expected_exit_px = target_exit_px
+            trail_mode = getattr(self, "runner_trail_mode", RUNNER_TRAIL_MODE)
+            trail_enabled = getattr(self, "enable_trailing_runner", True)
+            trail_pct = getattr(self, "runner_trail_pct", RUNNER_TRAIL_PCT)
+            if trail_enabled and trail_mode == "HWM":
+                # Convert position to a Trailing Runner rather than exiting completely
+                pos_info["runner_active"] = True
+                pos_info["target_hit_candle"] = candle_iso
+                if direction == "LONG":
+                    peak_price = max(entry_price, candle_high)
+                    pos_info["peak_price"] = peak_price
+                    effective_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                    pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
+                    logger.info(
+                        f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Long Target {LONG_PROFIT_TARGET_PCT}% reached on candle {candle_time_str} | "
+                        f"Peak: ₹{peak_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (-{trail_pct}%)"
+                    )
+                else:
+                    trough_price = min(entry_price, candle_low)
+                    pos_info["trough_price"] = trough_price
+                    effective_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                    pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
+                    logger.info(
+                        f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Short Target {SHORT_PROFIT_TARGET_PCT}% reached on candle {candle_time_str} | "
+                        f"Trough: ₹{trough_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (+{trail_pct}%)"
+                    )
+                self.state_manager.update_tracked_positions(tracked_positions)
+                return False
+            else:
+                exit_reason = "TARGET_HIT"
+                expected_exit_px = target_exit_px
+
         else:
-            exit_reason = "CATASTROPHE_SL"
-            expected_exit_px = sl_exit_px
+            return False
 
         exit_action = "SELL" if direction == "LONG" else "BUY"
         exit_qty = abs(qty)
@@ -2425,6 +2580,7 @@ class EMACrossPaperTradingEngine:
             action=exit_action,
             quantity=exit_qty,
             candle_time=candle_iso,
+            reference_price=candle_close,
         )
 
         if resp:
@@ -2597,6 +2753,7 @@ class EMACrossPaperTradingEngine:
         action = None
         exec_qty = 0
         is_reversal = False
+        is_exit_to_flat = False
 
         if sig == "BUY":
             if current_pos == 0:
@@ -2710,6 +2867,7 @@ class EMACrossPaperTradingEngine:
             action=action,
             quantity=exec_qty,
             candle_time=candle_iso,
+            reference_price=float(sig_data.get("close", 0.0)),
         )
 
         if resp:
@@ -2957,7 +3115,7 @@ class EMACrossPaperTradingEngine:
             return {"symbol": symbol, "contract_sym": None, "valid": False, "duration": time.perf_counter() - t0}
 
     def execute_cycle(self):
-        """Single portfolio scan cycle across all 218 NFO instruments."""
+        """Single portfolio scan cycle across all active NFO instruments."""
         cycle_t0 = time.perf_counter()
         now_ist = get_current_ist()
         logger.info(
@@ -3182,7 +3340,7 @@ def run_automated_tests() -> bool:
       16. Restart cannot duplicate an already executed signal
       17. Position reversal works correctly
       18. Paper/analyze safety guard blocks live execution
-      19. Full 218-symbol universe remains intact
+      19. Full 211-symbol active NFO universe remains intact
       20. Dynamic near-month contract discovery remains intact
       21. Single consolidated Telegram order notification formatting
       22. Mocked order fill execution & single-message dispatch
@@ -3233,12 +3391,26 @@ def run_automated_tests() -> bool:
         def __init__(self, *args, **kwargs):
             if "use_asymmetric_universe" not in kwargs:
                 kwargs["use_asymmetric_universe"] = False
+            if "state_file" not in kwargs:
+                import uuid, tempfile
+                self._tmp_state_file = Path(tempfile.gettempdir()) / f"test_emacross_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.json"
+                kwargs["state_file"] = self._tmp_state_file
+            else:
+                self._tmp_state_file = None
             super().__init__(*args, **kwargs)
             self.enable_time_filter = False
             self.enable_regime_filter = False
+            self.enable_trailing_runner = False
 
         def _startup_health_check(self):
             self.paper_mode_confirmed = True
+
+        def __del__(self):
+            if getattr(self, "_tmp_state_file", None) and self._tmp_state_file.exists():
+                try:
+                    self._tmp_state_file.unlink()
+                except Exception:
+                    pass
 
     # 1. Long SAME_CANDLE -> signal
     try:
@@ -3547,15 +3719,16 @@ def run_automated_tests() -> bool:
     except Exception as e:
         results.append((18, "Paper/analyze safety guard blocks live execution", False, str(e)))
 
-    # 19. Full 218-symbol universe remains intact
+    # 19. Full 211-symbol active NFO universe remains intact
     try:
-        assert len(DEFAULT_NFO_UNIVERSE) == 218, f"Expected 218 instruments, got {len(DEFAULT_NFO_UNIVERSE)}"
+        assert len(DEFAULT_NFO_UNIVERSE) == 211, f"Expected 211 instruments, got {len(DEFAULT_NFO_UNIVERSE)}"
         assert "SRF" in DEFAULT_NFO_UNIVERSE, "SRF missing from universe"
         assert "RELIANCE" in DEFAULT_NFO_UNIVERSE, "RELIANCE missing from universe"
         assert "NIFTY" in DEFAULT_NFO_UNIVERSE, "NIFTY missing from universe"
-        results.append((19, "Full 218-symbol universe remains intact", True, f"Exactly {len(DEFAULT_NFO_UNIVERSE)} symbols present"))
+        assert "SAGILITY" in DEFAULT_NFO_UNIVERSE, "SAGILITY missing from universe"
+        results.append((19, "Full 211-symbol active NFO universe remains intact", True, f"Exactly {len(DEFAULT_NFO_UNIVERSE)} symbols present"))
     except Exception as e:
-        results.append((19, "Full 218-symbol universe remains intact", False, str(e)))
+        results.append((19, "Full 211-symbol active NFO universe remains intact", False, str(e)))
 
     # 20. Dynamic near-month contract discovery remains intact
     try:
@@ -4423,6 +4596,102 @@ def run_automated_tests() -> bool:
     except Exception as e:
         results.append((37, "Asymmetric Universe exits unapproved short to FLAT", False, str(e)))
 
+    # 38. HWM Trailing Runner activates on target touch instead of closing position
+    try:
+        tmp_state38 = Path(f"/tmp/test_runner_activate_{int(time.time()*1000)}.json")
+        engine38 = MockTestEngine(symbols=["RELIANCE"], lots=1, max_active=10)
+        engine38.state_manager = PersistentStateManager(tmp_state38)
+        engine38.enable_trailing_runner = True
+        engine38.runner_trail_mode = "HWM"
+        engine38.runner_trail_pct = 0.35
+        contract_sym38 = "RELIANCE26SEPFUT"
+        engine38.state_manager.update_tracked_positions({
+            contract_sym38: {
+                "contract": contract_sym38,
+                "base_symbol": "RELIANCE",
+                "direction": "LONG",
+                "quantity": 250,
+                "average_price": 2000.0,
+                "candle_time": "08-Sep-2026 13:15",
+                "last_order_id": "ORD_ENTRY_38",
+            }
+        })
+        mock_cli38 = MagicMock()
+        engine38.client = mock_cli38
+        engine38.verify_paper_mode = lambda: (True, "analyze")
+
+        # Candle reaches target price 2060.0 (high=2065.0, low=2050.0)
+        df38 = make_test_df([
+            {"close": 2000.0, "high": 2010.0, "low": 1990.0, "open": 1995.0},
+            {"close": 2058.0, "high": 2065.0, "low": 2050.0, "open": 2015.0},
+        ])
+        exited38 = engine38.check_and_execute_target_or_sl("RELIANCE", contract_sym38, df38)
+        # Position should NOT exit; it must convert to runner
+        assert exited38 is False, "Position exited prematurely instead of activating runner!"
+        mock_cli38.placeorder.assert_not_called()
+        tracked38 = engine38.state_manager.state.get("tracked_positions", {}).get(contract_sym38, {})
+        assert tracked38.get("runner_active") is True, "runner_active flag not set on position!"
+        assert tracked38.get("peak_price") == 2065.0, f"Expected peak 2065.0, got {tracked38.get('peak_price')}"
+        expected_sl38 = round(2065.0 * (1.0 - 0.0035), 2)
+        assert tracked38.get("effective_trail_sl") == expected_sl38, f"Expected SL {expected_sl38}, got {tracked38.get('effective_trail_sl')}"
+        if tmp_state38.exists():
+            tmp_state38.unlink()
+        results.append((38, "HWM Trailing Runner activates on target hit", True, f"Runner activated; peak tracked at ₹2065.00, HWM trail set to ₹{expected_sl38}"))
+    except Exception as e:
+        results.append((38, "HWM Trailing Runner activates on target hit", False, str(e)))
+
+    # 39. HWM Trailing Runner exits when price breaches effective trail SL
+    try:
+        tmp_state39 = Path(f"/tmp/test_runner_exit_{int(time.time()*1000)}.json")
+        engine39 = MockTestEngine(symbols=["RELIANCE"], lots=1, max_active=10)
+        engine39.state_manager = PersistentStateManager(tmp_state39)
+        engine39.enable_trailing_runner = True
+        engine39.runner_trail_mode = "HWM"
+        engine39.runner_trail_pct = 0.35
+        contract_sym39 = "RELIANCE26SEPFUT"
+        engine39.state_manager.update_tracked_positions({
+            contract_sym39: {
+                "contract": contract_sym39,
+                "base_symbol": "RELIANCE",
+                "direction": "LONG",
+                "quantity": 250,
+                "average_price": 2000.0,
+                "candle_time": "08-Sep-2026 13:15",
+                "last_order_id": "ORD_ENTRY_39",
+                "runner_active": True,
+                "peak_price": 2100.0,
+                "effective_trail_sl": 2092.65,  # 2100 * (1 - 0.0035)
+            }
+        })
+        mock_cli39 = MagicMock()
+        mock_cli39.placeorder.return_value = {"status": "success", "orderid": "EXIT_RUNNER_39", "mode": "analyze"}
+        mock_cli39.orderstatus.return_value = {"status": "success", "data": {"average_price": 2092.0}}
+        engine39.client = mock_cli39
+        engine39.verify_paper_mode = lambda: (True, "analyze")
+
+        # Next candle pulls back below trailing stop (low=2085.0 <= 2092.65)
+        df39 = make_test_df([
+            {"close": 2000.0, "high": 2010.0, "low": 1990.0, "open": 1995.0},
+            {"close": 2088.0, "high": 2098.0, "low": 2085.0, "open": 2096.0},
+        ])
+        exit_msgs39 = []
+        with patch(f"{__name__}.send_telegram_alert", side_effect=lambda m: exit_msgs39.append(m)):
+            exited39 = engine39.check_and_execute_target_or_sl("RELIANCE", contract_sym39, df39)
+        assert exited39 is True, "Runner trail stop failed to trigger exit order!"
+        mock_cli39.placeorder.assert_called_once()
+        order_call39 = mock_cli39.placeorder.call_args[1]
+        assert order_call39["action"] == "SELL"
+        assert order_call39["quantity"] == 250
+        assert len(exit_msgs39) == 1
+        assert "RUNNER TRAIL HIT" in exit_msgs39[0]
+        tracked39 = engine39.state_manager.state.get("tracked_positions", {})
+        assert contract_sym39 not in tracked39, "Tracked position not cleared after runner exit"
+        if tmp_state39.exists():
+            tmp_state39.unlink()
+        results.append((39, "HWM Trailing Runner exits on pullback breach", True, "Runner successfully closed at trail SL; alert emitted with RUNNER TRAIL HIT"))
+    except Exception as e:
+        results.append((39, "HWM Trailing Runner exits on pullback breach", False, str(e)))
+
     # Summary Report
     all_passed = True
     for test_id, name, passed, detail in results:
@@ -4448,7 +4717,7 @@ def main():
     parser.add_argument(
         "--symbols",
         default=os.getenv("NFO_SYMBOLS", "ALL"),
-        help="Target symbols: 'ALL' for full 218-instrument universe or comma-separated list e.g. 'RELIANCE,TCS,INFY'.",
+        help="Target symbols: 'ALL' for full 211-instrument active NFO universe or comma-separated list e.g. 'RELIANCE,TCS,INFY'.",
     )
     parser.add_argument(
         "--lots",

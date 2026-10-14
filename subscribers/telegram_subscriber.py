@@ -21,7 +21,18 @@ def _send_alert(api_type, order_data, response_data, api_key):
             order_data.get("disable_telegram")
             or order_data.get("skip_telegram")
             or order_data.get("notify") is False
-            or strat in ["MACDFNO", "EMACROSSOPEN", "OIFNO", "MACD_FNO_V1", "EMACROSSOPEN_V1", "NIFTY_COVERED_CALL"]
+            or strat in [
+                "MACDFNO",
+                "EMACROSSOPEN",
+                "OIFNO",
+                "NIFTY_COVERED_CALL",
+                "MACD_FNO_V1",
+                "MACD_FNO_V2",
+                "EMACROSSOPEN_V1",
+                "EMACROSS_FNO_PAPER",
+                "OIFNO_V1",
+            ]
+            or any(strat.startswith(p) for p in ["MACD", "EMA", "OI", "NIFTY_COVERED"])
         ):
             logger.debug(f"Skipping generic Telegram alert for strategy order: {strat}")
             return

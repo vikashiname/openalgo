@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ichimoku TK Cross + MACD Dashboard - RELIANCE.NS</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #38bdf8;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --border: #334155;
+            --hover: #475569;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            padding: 24px;
+            min-height: 100vh;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .ticker-badge {
+            background-color: var(--primary);
+            color: #000;
+            font-weight: 800;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .stat-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            border-color: #475569;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .stat-value.up { color: var(--success); }
+        .stat-value.down { color: var(--danger); }
+        
+        .stat-card i {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            font-size: 28px;
+            opacity: 0.1;
+        }
+        
+        /* Layout Grid */
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        
+        @media(max-width: 1024px) {
+            .layout-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+        
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        /* Chart containers */
+        .chart-main-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 360px;
+            width: 100%;
+        }
+        
+        .chart-macd-container {
+            position: relative;
+            height: 180px;
+            width: 100%;
+        }
+        
+        .chart-equity-container {
+            position: relative;
+            height: 552px;
+            width: 100%;
+        }
+        
+        .chart-mini {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+        
+        /* Tabs */
+        .tabs-header {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 8px 16px;
+            border-radius: 8px;
+            background-color: rgba(255,255,255,0.03);
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab-btn.active {
+            background-color: var(--primary);
+            color: #000;
+            border-color: var(--primary);
+        }
+        
+        .tab-btn:hover:not(.active) {
+            background-color: var(--hover);
+            color: var(--text-main);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Config Table styling */
+        .config-table, .trade-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        
+        .config-table tr {
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .config-table tr:last-child {
+            border-bottom: none;
+        }
+        
+        .config-table td {
+            padding: 10px 0;
+        }
+        
+        .config-table td:first-child {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+        
+        .config-table td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+        
+        /* Trade Table styling */
+        .table-wrapper {
+            overflow-x: auto;
+            max-height: 500px;
+        }
+        
+        .trade-table th, .trade-table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .trade-table th {
+            background-color: rgba(255,255,255,0.02);
+            color: var(--text-muted);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .trade-table tr:hover {
+            background-color: rgba(255,255,255,0.01);
+        }
+        
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        
+        .badge.long {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+        
+        .badge.short {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+        }
+        
+        .profit-val { font-weight: 600; }
+        .profit-val.win { color: var(--success); }
+        .profit-val.loss { color: var(--danger); }
+        
+        .filter-bar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+        
+        .search-input {
+            background-color: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 8px;
+            outline: none;
+            width: 250px;
+        }
+        
+        .search-input:focus {
+            border-color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <span class="ticker-badge">RELIANCE.NS</span>
+            <span style="color: var(--text-muted); margin-left: 10px; font-size: 14px;">Daily Positional TK Cross + MACD Backtest</span>
+            <h1 style="margin-top: 8px;">Ichimoku Crossover Strategy with MACD Momentum</h1>
+        </div>
+        <div style="text-align: right;">
+            <p style="font-size: 12px; color: var(--text-muted);">Generated on</p>
+            <p style="font-weight: 600; font-size: 14px;">2026-08-31 19:23</p>
+        </div>
+    </header>
+    
+    <!-- STATS CARD GRID -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <span class="stat-label">Net Profit</span>
+            <span class="stat-value down">
+                -3,014.20
+            </span>
+            <span style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+                Return: -3.01%
+            </span>
+            <i class="fa-solid fa-wallet"></i>
+        </div>
+        
+        <div class="stat-card">
+            <span class="stat-label">Win Rate</span>
+            <span class="stat-value">0.0%</span>
+            <span style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+                0 Wins / 2 Losses
+            </span>
+            <i class="fa-solid fa-chart-pie"></i>
+        </div>
+        
+        <div class="stat-card">
+            <span class="stat-label">Profit Factor</span>
+            <span class="stat-value">0.0</span>
+            <span style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+                Gross Profit / Gross Loss
+            </span>
+            <i class="fa-solid fa-scale-balanced"></i>
+        </div>
+        
+        <div class="stat-card">
+            <span class="stat-label">Max Drawdown</span>
+            <span class="stat-value down">-3.01%</span>
+            <span style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+                CAGR: -4.34%
+            </span>
+            <i class="fa-solid fa-arrow-down-long"></i>
+        </div>
+        
+        <div class="stat-card">
+            <span class="stat-label">Sharpe Ratio</span>
+            <span class="stat-value" style="color: var(--warning);">-1.87</span>
+            <span style="font-size: 12px; margin-top: 4px; color: var(--text-muted);">
+                Sortino: -0.77
+            </span>
+            <i class="fa-solid fa-percent"></i>
+        </div>
+    </div>
+    
+    <!-- LAYOUT GRID -->
+    <div class="layout-grid">
+        <!-- Main Chart Section -->
+        <div>
+            <div class="card" style="margin-bottom: 24px;">
+                <div class="tabs-header">
+                    <button class="tab-btn active" onclick="switchTab('main-chart-tab', this)">Stock Price, Ichimoku & MACD</button>
+                    <button class="tab-btn" onclick="switchTab('equity-chart-tab', this)">Equity Growth</button>
+                </div>
+                
+                <div id="main-chart-tab" class="tab-content active">
+                    <div class="chart-main-container">
+                        <div class="chart-container">
+                            <canvas id="priceChart"></canvas>
+                        </div>
+                        <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+                            <h4 style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px;">MACD (12, 26, 9)</h4>
+                            <div class="chart-macd-container">
+                                <canvas id="macdChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="equity-chart-tab" class="tab-content">
+                    <div class="chart-equity-container">
+                        <canvas id="equityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sidebar Configurations & Exit Breakdown -->
+        <div>
+            <div class="card">
+                <div class="card-title">Strategy Configurations <i class="fa-solid fa-sliders text-muted"></i></div>
+                <table class="config-table">
+                    <tr><td>Symbol</td><td>RELIANCE.NS</td></tr><tr><td>Period / Range</td><td>1y</td></tr><tr><td>Tenkan Period (Conversion Line)</td><td>9</td></tr><tr><td>Kijun Period (Base Line)</td><td>26</td></tr><tr><td>Senkou Span B Period</td><td>52</td></tr><tr><td>Displacement (Chikou/Span Shift)</td><td>26</td></tr><tr><td>Initial Capital</td><td>$100,000.00</td></tr><tr><td>Risk Per Trade</td><td>1.5%</td></tr><tr><td>Stop Loss Type</td><td>ATR</td></tr><tr><td>Risk-Reward Target</td><td>2.5x</td></tr><tr><td>Trailing Stop Loss</td><td>ENABLED</td></tr><tr><td>Trailing Target</td><td>DISABLED</td></tr><tr><td>Cloud Thickness Filter</td><td>ENABLED</td></tr><tr><td>Cloud Thickness Threshold</td><td>0.8%</td></tr><tr><td>Short Trading</td><td>ENABLED</td></tr><tr><td>Filters Active</td><td>Kumo Cloud, Future Cloud, Cloud Thickness, MACD State</td></tr>
+                </table>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">Exit Breakdown <i class="fa-solid fa-door-open text-muted"></i></div>
+                <div class="chart-mini">
+                    <canvas id="exitChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- TRADE LOGS SECTION -->
+    <div class="card">
+        <div class="card-title">
+            <span>Executed Trade History (2 Trades)</span>
+            <div class="filter-bar">
+                <input type="text" id="tradeSearch" onkeyup="searchTrades()" placeholder="Search trade history..." class="search-input">
+            </div>
+        </div>
+        
+        <div class="table-wrapper">
+            <table class="trade-table" id="tradesTable">
+                <thead>
+                    <tr>
+                        <th>Trade #</th>
+                        <th>Type</th>
+                        <th>Entry Time</th>
+                        <th>Entry Price</th>
+                        <th>Initial SL</th>
+                        <th>Exit Time</th>
+                        <th>Exit Price</th>
+                        <th>Qty</th>
+                        <th>Profit/Loss</th>
+                        <th>Exit Reason</th>
+                        <th>Ichimoku Cond</th>
+                        <th>MACD Cond</th>
+                        <th>Ending Capital</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td>1</td>
+                        <td><span class="badge short">SHORT</span></td>
+                        <td>2026-03-04</td>
+                        <td>1,323.22</td>
+                        <td>1,378.95</td>
+                        <td>2026-03-05</td>
+                        <td>1,379.63</td>
+                        <td>26</td>
+                        <td class="profit-val loss">-1,506.86</td>
+                        <td>Stop Loss</td>
+                        <td><span class="badge" style="background-color: rgba(99, 102, 241, 0.15); color: #818cf8; font-weight: 600;">STRONG_BEAR</span></td>
+                        <td><span class="badge" style="background-color: rgba(249, 115, 22, 0.15); color: #fb923c; font-weight: 600;">BEARISH</span></td>
+                        <td>98,493.14</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>2</td>
+                        <td><span class="badge short">SHORT</span></td>
+                        <td>2026-04-07</td>
+                        <td>1,288.4</td>
+                        <td>1,357.59</td>
+                        <td>2026-04-17</td>
+                        <td>1,358.27</td>
+                        <td>21</td>
+                        <td class="profit-val loss">-1,507.34</td>
+                        <td>Stop Loss</td>
+                        <td><span class="badge" style="background-color: rgba(99, 102, 241, 0.15); color: #818cf8; font-weight: 600;">STRONG_BEAR</span></td>
+                        <td><span class="badge" style="background-color: rgba(249, 115, 22, 0.15); color: #fb923c; font-weight: 600;">BEARISH</span></td>
+                        <td>96,985.81</td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        function switchTab(tabId, btn) {
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(c => c.classList.remove('active'));
+            
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach(b => b.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+        }
+        
+        function searchTrades() {
+            const input = document.getElementById("tradeSearch");
+            const filter = input.value.toUpperCase();
+            const table = document.getElementById("tradesTable");
+            const tr = table.getElementsByTagName("tr");
+            
+            for (let i = 1; i < tr.length; i++) {
+                let match = false;
+                const tds = tr[i].getElementsByTagName("td");
+                for(let j=0; j<tds.length; j++) {
+                    if (tds[j]) {
+                        const text = tds[j].textContent || tds[j].innerText;
+                        if (text.toUpperCase().indexOf(filter) > -1) {
+                            match = true;
+                            break;
+                        }
+                    }
+                }
+                tr[i].style.display = match ? "" : "none";
+            }
+        }
+
+        const raw_historical_data = [{"date": "2025-12-22", "close": 1568.15, "tenkan": 1543.61, "kijun": 1538.79, "span_a": 1464.23, "span_b": 1426.06, "macd": 14.14, "macd_signal": 15.21, "macd_hist": -1.07}, {"date": "2025-12-23", "close": 1563.47, "tenkan": 1545.31, "kijun": 1538.79, "span_a": 1465.05, "span_b": 1432.97, "macd": 14.58, "macd_signal": 15.08, "macd_hist": -0.5}, {"date": "2025-12-24", "close": 1551.03, "tenkan": 1550.88, "kijun": 1539.53, "span_a": 1467.94, "span_b": 1435.71, "macd": 13.77, "macd_signal": 14.82, "macd_hist": -1.05}, {"date": "2025-12-26", "close": 1552.02, "tenkan": 1550.88, "kijun": 1542.32, "span_a": 1467.94, "span_b": 1435.71, "macd": 13.06, "macd_signal": 14.47, "macd_hist": -1.41}, {"date": "2025-12-29", "close": 1538.49, "tenkan": 1550.88, "kijun": 1542.32, "span_a": 1480.01, "span_b": 1447.21, "macd": 11.27, "macd_signal": 13.83, "macd_hist": -2.56}, {"date": "2025-12-30", "close": 1532.71, "tenkan": 1550.88, "kijun": 1542.32, "span_a": 1485.26, "span_b": 1450.64, "macd": 9.28, "macd_signal": 12.92, "macd_hist": -3.64}, {"date": "2025-12-31", "close": 1563.17, "tenkan": 1550.88, "kijun": 1542.32, "span_a": 1490.76, "span_b": 1450.64, "macd": 10.05, "macd_signal": 12.34, "macd_hist": -2.3}, {"date": "2026-01-01", "close": 1568.35, "tenkan": 1557.95, "kijun": 1547.89, "span_a": 1499.02, "span_b": 1451.54, "macd": 10.94, "macd_signal": 12.06, "macd_hist": -1.12}, {"date": "2026-01-02", "close": 1584.97, "tenkan": 1558.99, "kijun": 1548.94, "span_a": 1513.5, "span_b": 1457.51, "macd": 12.85, "macd_signal": 12.22, "macd_hist": 0.63}, {"date": "2026-01-05", "close": 1570.84, "tenkan": 1567.55, "kijun": 1557.5, "span_a": 1518.6, "span_b": 1459.45, "macd": 13.07, "macd_signal": 12.39, "macd_hist": 0.68}, {"date": "2026-01-06", "close": 1500.66, "tenkan": 1546.9, "kijun": 1546.9, "span_a": 1521.49, "span_b": 1462.34, "macd": 7.49, "macd_signal": 11.41, "macd_hist": -3.92}, {"date": "2026-01-07", "close": 1497.28, "tenkan": 1546.9, "kijun": 1546.9, "span_a": 1521.86, "span_b": 1462.34, "macd": 2.77, "macd_signal": 9.68, "macd_hist": -6.91}, {"date": "2026-01-08", "close": 1463.83, "tenkan": 1533.21, "kijun": 1533.21, "span_a": 1529.35, "span_b": 1462.34, "macd": -3.63, "macd_signal": 7.02, "macd_hist": -10.65}, {"date": "2026-01-09", "close": 1468.51, "tenkan": 1531.32, "kijun": 1531.32, "span_a": 1532.36, "span_b": 1462.34, "macd": -8.23, "macd_signal": 3.97, "macd_hist": -12.2}, {"date": "2026-01-12", "close": 1476.37, "tenkan": 1524.35, "kijun": 1524.35, "span_a": 1530.5, "span_b": 1462.34, "macd": -11.12, "macd_signal": 0.95, "macd_hist": -12.07}, {"date": "2026-01-13", "close": 1446.11, "tenkan": 1521.22, "kijun": 1521.22, "span_a": 1530.5, "span_b": 1462.34, "macd": -15.66, "macd_signal": -2.37, "macd_hist": -13.29}, {"date": "2026-01-14", "close": 1452.09, "tenkan": 1518.98, "kijun": 1518.98, "span_a": 1530.5, "span_b": 1462.34, "macd": -18.57, "macd_signal": -5.61, "macd_hist": -12.96}, {"date": "2026-01-15", "close": 1452.09, "tenkan": 1518.98, "kijun": 1518.98, "span_a": 1530.5, "span_b": 1462.34, "macd": -20.63, "macd_signal": -8.62, "macd_hist": -12.02}, {"date": "2026-01-16", "close": 1451.19, "tenkan": 1497.68, "kijun": 1518.98, "span_a": 1530.5, "span_b": 1462.34, "macd": -22.09, "macd_signal": -11.31, "macd_hist": -10.78}, {"date": "2026-01-19", "close": 1407.09, "tenkan": 1454.92, "kijun": 1500.61, "span_a": 1530.9, "span_b": 1462.34, "macd": -26.5, "macd_signal": -14.35, "macd_hist": -12.15}, {"date": "2026-01-20", "close": 1387.58, "tenkan": 1440.29, "kijun": 1493.99, "span_a": 1528.41, "span_b": 1462.34, "macd": -31.2, "macd_signal": -17.72, "macd_hist": -13.48}, {"date": "2026-01-21", "close": 1398.14, "tenkan": 1422.82, "kijun": 1485.53, "span_a": 1526.67, "span_b": 1462.34, "macd": -33.69, "macd_signal": -20.91, "macd_hist": -12.78}, {"date": "2026-01-22", "close": 1396.05, "tenkan": 1422.82, "kijun": 1485.53, "span_a": 1527.84, "span_b": 1462.34, "macd": -35.42, "macd_signal": -23.82, "macd_hist": -11.61}, {"date": "2026-01-23", "close": 1379.72, "tenkan": 1422.82, "kijun": 1485.53, "span_a": 1533.21, "span_b": 1462.34, "macd": -37.68, "macd_signal": -26.59, "macd_hist": -11.09}, {"date": "2026-01-27", "close": 1374.15, "tenkan": 1417.45, "kijun": 1483.04, "span_a": 1534.58, "span_b": 1463.38, "macd": -39.46, "macd_signal": -29.16, "macd_hist": -10.3}, {"date": "2026-01-28", "close": 1390.27, "tenkan": 1417.45, "kijun": 1483.04, "span_a": 1538.16, "span_b": 1466.12, "macd": -39.13, "macd_signal": -31.16, "macd_hist": -7.97}, {"date": "2026-01-29", "close": 1384.6, "tenkan": 1417.45, "kijun": 1483.04, "span_a": 1541.2, "span_b": 1466.12, "macd": -38.87, "macd_signal": -32.7, "macd_hist": -6.17}, {"date": "2026-01-30", "close": 1388.98, "tenkan": 1402.81, "kijun": 1483.04, "span_a": 1542.05, "span_b": 1467.76, "macd": -37.87, "macd_signal": -33.73, "macd_hist": -4.14}, {"date": "2026-02-02", "close": 1384.0, "tenkan": 1371.16, "kijun": 1466.87, "span_a": 1545.21, "span_b": 1467.76, "macd": -37.06, "macd_signal": -34.4, "macd_hist": -2.66}, {"date": "2026-02-03", "close": 1430.49, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1546.6, "span_b": 1467.76, "macd": -32.29, "macd_signal": -33.98, "macd_hist": 1.69}, {"date": "2026-02-04", "close": 1450.1, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1546.6, "span_b": 1468.91, "macd": -26.62, "macd_signal": -32.51, "macd_hist": 5.88}, {"date": "2026-02-05", "close": 1436.76, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1546.6, "span_b": 1470.2, "macd": -22.94, "macd_signal": -30.59, "macd_hist": 7.65}, {"date": "2026-02-06", "close": 1444.12, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1546.6, "span_b": 1471.35, "macd": -19.21, "macd_signal": -28.32, "macd_hist": 9.11}, {"date": "2026-02-09", "close": 1454.87, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1552.92, "span_b": 1488.92, "macd": -15.21, "macd_signal": -25.69, "macd_hist": 10.49}, {"date": "2026-02-10", "close": 1451.79, "tenkan": 1406.0, "kijun": 1466.87, "span_a": 1553.97, "span_b": 1506.98, "macd": -12.15, "macd_signal": -22.98, "macd_hist": 10.84}, {"date": "2026-02-11", "close": 1461.94, "tenkan": 1406.0, "kijun": 1445.57, "span_a": 1562.53, "span_b": 1519.38, "macd": -8.8, "macd_signal": -20.15, "macd_hist": 11.35}, {"date": "2026-02-12", "close": 1442.23, "tenkan": 1406.0, "kijun": 1421.18, "span_a": 1546.9, "span_b": 1519.38, "macd": -7.65, "macd_signal": -17.65, "macd_hist": 10.0}, {"date": "2026-02-13", "close": 1413.07, "tenkan": 1446.21, "kijun": 1413.17, "span_a": 1546.9, "span_b": 1519.38, "macd": -8.99, "macd_signal": -15.92, "macd_hist": 6.93}, {"date": "2026-02-16", "close": 1430.49, "tenkan": 1434.52, "kijun": 1406.0, "span_a": 1533.21, "span_b": 1527.84, "macd": -8.54, "macd_signal": -14.44, "macd_hist": 5.9}, {"date": "2026-02-17", "close": 1416.45, "tenkan": 1434.52, "kijun": 1406.0, "span_a": 1531.32, "span_b": 1531.32, "macd": -9.22, "macd_signal": -13.4, "macd_hist": 4.18}, {"date": "2026-02-18", "close": 1434.67, "tenkan": 1434.52, "kijun": 1406.0, "span_a": 1524.35, "span_b": 1524.35, "macd": -8.19, "macd_signal": -12.35, "macd_hist": 4.17}, {"date": "2026-02-19", "close": 1403.01, "tenkan": 1429.89, "kijun": 1406.0, "span_a": 1521.22, "span_b": 1521.22, "macd": -9.81, "macd_signal": -11.85, "macd_hist": 2.03}, {"date": "2026-02-20", "close": 1412.87, "tenkan": 1429.89, "kijun": 1406.0, "span_a": 1518.98, "span_b": 1518.98, "macd": -10.19, "macd_signal": -11.52, "macd_hist": 1.33}, {"date": "2026-02-23", "close": 1421.43, "tenkan": 1429.89, "kijun": 1406.0, "span_a": 1518.98, "span_b": 1518.98, "macd": -9.68, "macd_signal": -11.15, "macd_hist": 1.46}, {"date": "2026-02-24", "close": 1422.22, "tenkan": 1429.89, "kijun": 1406.0, "span_a": 1508.33, "span_b": 1518.98, "macd": -9.11, "macd_signal": -10.74, "macd_hist": 1.63}, {"date": "2026-02-25", "close": 1392.06, "tenkan": 1415.56, "kijun": 1406.0, "span_a": 1477.77, "span_b": 1500.61, "macd": -10.97, "macd_signal": -10.79, "macd_hist": -0.18}, {"date": "2026-02-26", "close": 1400.33, "tenkan": 1410.93, "kijun": 1406.0, "span_a": 1467.14, "span_b": 1493.99, "macd": -11.64, "macd_signal": -10.96, "macd_hist": -0.68}, {"date": "2026-02-27", "close": 1387.48, "tenkan": 1409.04, "kijun": 1406.0, "span_a": 1454.18, "span_b": 1485.53, "macd": -13.06, "macd_signal": -11.38, "macd_hist": -1.68}, {"date": "2026-03-02", "close": 1351.75, "tenkan": 1385.84, "kijun": 1406.0, "span_a": 1454.18, "span_b": 1485.53, "macd": -16.87, "macd_signal": -12.48, "macd_hist": -4.39}, {"date": "2026-03-04", "close": 1338.81, "tenkan": 1368.67, "kijun": 1391.81, "span_a": 1454.18, "span_b": 1485.53, "macd": -20.69, "macd_signal": -14.12, "macd_hist": -6.58}, {"date": "2026-03-05", "close": 1383.01, "tenkan": 1367.43, "kijun": 1391.81, "span_a": 1450.24, "span_b": 1483.04, "macd": -19.93, "macd_signal": -15.28, "macd_hist": -4.65}, {"date": "2026-03-06", "close": 1398.33, "tenkan": 1367.43, "kijun": 1391.81, "span_a": 1450.24, "span_b": 1483.04, "macd": -17.88, "macd_signal": -15.8, "macd_hist": -2.08}, {"date": "2026-03-09", "close": 1417.45, "tenkan": 1367.43, "kijun": 1391.81, "span_a": 1450.24, "span_b": 1483.04, "macd": -14.55, "macd_signal": -15.55, "macd_hist": 1.0}, {"date": "2026-03-10", "close": 1402.32, "tenkan": 1367.43, "kijun": 1391.81, "span_a": 1442.93, "span_b": 1483.04, "macd": -12.98, "macd_signal": -15.04, "macd_hist": 2.06}, {"date": "2026-03-11", "close": 1383.8, "tenkan": 1364.19, "kijun": 1391.81, "span_a": 1419.01, "span_b": 1466.87, "macd": -13.08, "macd_signal": -14.65, "macd_hist": 1.57}, {"date": "2026-03-12", "close": 1385.79, "tenkan": 1364.19, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -12.85, "macd_signal": -14.29, "macd_hist": 1.44}, {"date": "2026-03-13", "close": 1374.35, "tenkan": 1364.19, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -13.43, "macd_signal": -14.12, "macd_hist": 0.68}, {"date": "2026-03-16", "close": 1388.68, "tenkan": 1364.19, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -12.6, "macd_signal": -13.81, "macd_hist": 1.21}, {"date": "2026-03-17", "close": 1391.17, "tenkan": 1387.14, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -11.6, "macd_signal": -13.37, "macd_hist": 1.77}, {"date": "2026-03-18", "close": 1401.62, "tenkan": 1392.31, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -9.85, "macd_signal": -12.67, "macd_hist": 2.81}, {"date": "2026-03-19", "close": 1378.43, "tenkan": 1392.31, "kijun": 1383.6, "span_a": 1436.43, "span_b": 1466.87, "macd": -10.22, "macd_signal": -12.18, "macd_hist": 1.96}, {"date": "2026-03-20", "close": 1407.89, "tenkan": 1392.31, "kijun": 1383.6, "span_a": 1425.78, "span_b": 1466.87, "macd": -8.04, "macd_signal": -11.35, "macd_hist": 3.31}, {"date": "2026-03-23", "close": 1401.32, "tenkan": 1392.31, "kijun": 1372.5, "span_a": 1413.59, "span_b": 1466.87, "macd": -6.77, "macd_signal": -10.43, "macd_hist": 3.67}, {"date": "2026-03-24", "close": 1405.3, "tenkan": 1390.32, "kijun": 1368.67, "span_a": 1429.69, "span_b": 1466.87, "macd": -5.37, "macd_signal": -9.42, "macd_hist": 4.05}, {"date": "2026-03-25", "close": 1406.6, "tenkan": 1390.57, "kijun": 1368.67, "span_a": 1420.26, "span_b": 1466.87, "macd": -4.12, "macd_signal": -8.36, "macd_hist": 4.24}, {"date": "2026-03-27", "close": 1341.9, "tenkan": 1381.36, "kijun": 1368.67, "span_a": 1420.26, "span_b": 1466.87, "macd": -8.25, "macd_signal": -8.34, "macd_hist": 0.09}, {"date": "2026-03-30", "close": 1337.71, "tenkan": 1375.94, "kijun": 1368.67, "span_a": 1420.26, "span_b": 1466.87, "macd": -11.72, "macd_signal": -9.02, "macd_hist": -2.71}, {"date": "2026-04-01", "close": 1362.9, "tenkan": 1375.94, "kijun": 1367.43, "span_a": 1417.94, "span_b": 1466.87, "macd": -12.31, "macd_signal": -9.67, "macd_hist": -2.63}, {"date": "2026-04-02", "close": 1344.28, "tenkan": 1372.9, "kijun": 1367.43, "span_a": 1417.94, "span_b": 1466.87, "macd": -14.1, "macd_signal": -10.56, "macd_hist": -3.54}, {"date": "2026-04-06", "close": 1298.7, "tenkan": 1353.99, "kijun": 1358.97, "span_a": 1417.94, "span_b": 1466.87, "macd": -18.99, "macd_signal": -12.25, "macd_hist": -6.74}, {"date": "2026-04-07", "close": 1298.6, "tenkan": 1353.99, "kijun": 1358.97, "span_a": 1417.94, "span_b": 1466.87, "macd": -22.61, "macd_signal": -14.32, "macd_hist": -8.29}, {"date": "2026-04-08", "close": 1341.6, "tenkan": 1353.99, "kijun": 1355.73, "span_a": 1410.78, "span_b": 1466.87, "macd": -21.76, "macd_signal": -15.81, "macd_hist": -5.95}, {"date": "2026-04-09", "close": 1323.88, "tenkan": 1353.99, "kijun": 1355.73, "span_a": 1408.46, "span_b": 1466.87, "macd": -22.26, "macd_signal": -17.1, "macd_hist": -5.16}, {"date": "2026-04-10", "close": 1343.99, "tenkan": 1341.15, "kijun": 1355.73, "span_a": 1407.52, "span_b": 1466.87, "macd": -20.79, "macd_signal": -17.83, "macd_hist": -2.95}, {"date": "2026-04-13", "close": 1309.05, "tenkan": 1331.05, "kijun": 1355.73, "span_a": 1395.92, "span_b": 1466.87, "macd": -22.19, "macd_signal": -18.71, "macd_hist": -3.48}, {"date": "2026-04-15", "close": 1337.91, "tenkan": 1331.05, "kijun": 1355.73, "span_a": 1380.24, "span_b": 1452.68, "macd": -20.73, "macd_signal": -19.11, "macd_hist": -1.62}, {"date": "2026-04-16", "close": 1337.12, "tenkan": 1318.4, "kijun": 1355.73, "span_a": 1379.62, "span_b": 1452.68, "macd": -19.41, "macd_signal": -19.17, "macd_hist": -0.24}, {"date": "2026-04-17", "close": 1358.72, "tenkan": 1323.08, "kijun": 1355.73, "span_a": 1379.62, "span_b": 1452.68, "macd": -16.44, "macd_signal": -18.62, "macd_hist": 2.19}, {"date": "2026-04-20", "close": 1357.03, "tenkan": 1325.87, "kijun": 1355.73, "span_a": 1379.62, "span_b": 1452.68, "macd": -14.06, "macd_signal": -17.71, "macd_hist": 3.65}, {"date": "2026-04-21", "close": 1347.07, "tenkan": 1335.33, "kijun": 1355.73, "span_a": 1379.62, "span_b": 1452.68, "macd": -12.82, "macd_signal": -16.73, "macd_hist": 3.91}, {"date": "2026-04-22", "close": 1355.83, "tenkan": 1335.33, "kijun": 1353.99, "span_a": 1378.0, "span_b": 1452.68, "macd": -11.01, "macd_signal": -15.59, "macd_hist": 4.58}, {"date": "2026-04-23", "close": 1337.22, "tenkan": 1335.33, "kijun": 1353.99, "span_a": 1373.9, "span_b": 1452.68, "macd": -10.95, "macd_signal": -14.66, "macd_hist": 3.71}, {"date": "2026-04-24", "close": 1321.69, "tenkan": 1335.33, "kijun": 1353.99, "span_a": 1373.9, "span_b": 1452.68, "macd": -12.02, "macd_signal": -14.13, "macd_hist": 2.11}, {"date": "2026-04-27", "close": 1359.51, "tenkan": 1335.82, "kijun": 1353.99, "span_a": 1373.9, "span_b": 1452.68, "macd": -9.7, "macd_signal": -13.25, "macd_hist": 3.55}, {"date": "2026-04-28", "close": 1382.51, "tenkan": 1346.87, "kijun": 1353.99, "span_a": 1385.37, "span_b": 1452.68, "macd": -5.94, "macd_signal": -11.79, "macd_hist": 5.85}, {"date": "2026-04-29", "close": 1418.84, "tenkan": 1366.08, "kijun": 1355.63, "span_a": 1387.96, "span_b": 1452.68, "macd": -0.03, "macd_signal": -9.43, "macd_hist": 9.41}, {"date": "2026-04-30", "close": 1424.22, "tenkan": 1367.68, "kijun": 1357.22, "span_a": 1387.96, "span_b": 1452.68, "macd": 5.03, "macd_signal": -6.54, "macd_hist": 11.57}, {"date": "2026-05-01", "close": 1424.22, "tenkan": 1367.68, "kijun": 1357.22, "span_a": 1387.96, "span_b": 1431.38, "macd": 8.94, "macd_signal": -3.44, "macd_hist": 12.39}, {"date": "2026-05-04", "close": 1456.37, "tenkan": 1382.81, "kijun": 1372.35, "span_a": 1382.41, "span_b": 1406.99, "macd": 14.47, "macd_signal": 0.14, "macd_hist": 14.33}, {"date": "2026-05-05", "close": 1456.86, "tenkan": 1385.79, "kijun": 1375.34, "span_a": 1379.5, "span_b": 1398.98, "macd": 18.67, "macd_signal": 3.84, "macd_hist": 14.83}, {"date": "2026-05-06", "close": 1431.28, "tenkan": 1385.79, "kijun": 1375.34, "span_a": 1379.62, "span_b": 1391.81, "macd": 19.71, "macd_signal": 7.02, "macd_hist": 12.69}, {"date": "2026-05-07", "close": 1429.59, "tenkan": 1385.79, "kijun": 1375.34, "span_a": 1375.02, "span_b": 1391.81, "macd": 20.17, "macd_signal": 9.65, "macd_hist": 10.52}, {"date": "2026-05-08", "close": 1428.59, "tenkan": 1408.69, "kijun": 1375.34, "span_a": 1372.31, "span_b": 1391.81, "macd": 20.21, "macd_signal": 11.76, "macd_hist": 8.45}, {"date": "2026-05-11", "close": 1381.81, "tenkan": 1421.13, "kijun": 1375.34, "span_a": 1371.68, "span_b": 1391.81, "macd": 16.29, "macd_signal": 12.67, "macd_hist": 3.62}, {"date": "2026-05-12", "close": 1357.72, "tenkan": 1410.33, "kijun": 1375.34, "span_a": 1370.16, "span_b": 1391.81, "macd": 11.1, "macd_signal": 12.35, "macd_hist": -1.25}, {"date": "2026-05-13", "close": 1352.55, "tenkan": 1406.4, "kijun": 1375.84, "span_a": 1356.48, "span_b": 1383.35, "macd": 6.5, "macd_signal": 11.18, "macd_hist": -4.68}, {"date": "2026-05-14", "close": 1355.53, "tenkan": 1406.4, "kijun": 1385.29, "span_a": 1356.48, "span_b": 1383.35, "macd": 3.07, "macd_signal": 9.56, "macd_hist": -6.49}, {"date": "2026-05-15", "close": 1330.25, "tenkan": 1394.85, "kijun": 1385.29, "span_a": 1354.86, "span_b": 1383.35, "macd": -1.68, "macd_signal": 7.31, "macd_hist": -8.99}, {"date": "2026-05-18", "close": 1329.75, "tenkan": 1389.58, "kijun": 1385.29, "span_a": 1354.86, "span_b": 1383.35, "macd": -5.42, "macd_signal": 4.77, "macd_hist": -10.19}, {"date": "2026-05-19", "close": 1316.61, "tenkan": 1377.58, "kijun": 1385.29, "span_a": 1348.44, "span_b": 1383.35, "macd": -9.34, "macd_signal": 1.94, "macd_hist": -11.28}, {"date": "2026-05-20", "close": 1353.44, "tenkan": 1371.36, "kijun": 1385.79, "span_a": 1343.39, "span_b": 1383.35, "macd": -9.36, "macd_signal": -0.32, "macd_hist": -9.04}, {"date": "2026-05-21", "close": 1343.39, "tenkan": 1363.99, "kijun": 1385.79, "span_a": 1343.39, "span_b": 1383.35, "macd": -10.08, "macd_signal": -2.27, "macd_hist": -7.81}, {"date": "2026-05-22", "close": 1348.27, "tenkan": 1346.82, "kijun": 1385.79, "span_a": 1337.07, "span_b": 1383.35, "macd": -10.13, "macd_signal": -3.84, "macd_hist": -6.29}, {"date": "2026-05-25", "close": 1360.71, "tenkan": 1339.11, "kijun": 1385.79, "span_a": 1339.41, "span_b": 1383.35, "macd": -9.07, "macd_signal": -4.89, "macd_hist": -4.18}, {"date": "2026-05-26", "close": 1350.06, "tenkan": 1339.11, "kijun": 1385.79, "span_a": 1340.8, "span_b": 1383.35, "macd": -8.98, "macd_signal": -5.7, "macd_hist": -3.27}, {"date": "2026-05-27", "close": 1344.28, "tenkan": 1335.67, "kijun": 1385.79, "span_a": 1345.53, "span_b": 1383.35, "macd": -9.27, "macd_signal": -6.42, "macd_hist": -2.85}, {"date": "2026-05-28", "close": 1344.28, "tenkan": 1335.67, "kijun": 1385.79, "span_a": 1344.66, "span_b": 1383.35, "macd": -9.39, "macd_signal": -7.01, "macd_hist": -2.38}, {"date": "2026-05-29", "close": 1315.12, "tenkan": 1335.67, "kijun": 1385.79, "span_a": 1344.66, "span_b": 1375.14, "macd": -11.7, "macd_signal": -7.95, "macd_hist": -3.75}, {"date": "2026-06-01", "close": 1313.92, "tenkan": 1335.67, "kijun": 1385.79, "span_a": 1344.66, "span_b": 1375.14, "macd": -13.48, "macd_signal": -9.06, "macd_hist": -4.42}, {"date": "2026-06-02", "close": 1308.55, "tenkan": 1329.55, "kijun": 1380.47, "span_a": 1344.91, "span_b": 1375.14, "macd": -15.15, "macd_signal": -10.27, "macd_hist": -4.87}, {"date": "2026-06-03", "close": 1307.16, "tenkan": 1329.55, "kijun": 1380.47, "span_a": 1350.43, "span_b": 1375.14, "macd": -16.39, "macd_signal": -11.5, "macd_hist": -4.89}, {"date": "2026-06-04", "close": 1297.7, "tenkan": 1325.97, "kijun": 1376.88, "span_a": 1360.86, "span_b": 1375.14, "macd": -17.93, "macd_signal": -12.78, "macd_hist": -5.15}, {"date": "2026-06-05", "close": 1291.0, "tenkan": 1324.92, "kijun": 1376.88, "span_a": 1362.45, "span_b": 1375.14, "macd": -19.47, "macd_signal": -14.12, "macd_hist": -5.35}, {"date": "2026-06-08", "close": 1263.3, "tenkan": 1310.95, "kijun": 1362.91, "span_a": 1362.45, "span_b": 1375.14, "macd": -22.66, "macd_signal": -15.83, "macd_hist": -6.83}, {"date": "2026-06-09", "close": 1269.2, "tenkan": 1310.1, "kijun": 1362.06, "span_a": 1377.58, "span_b": 1372.35, "macd": -24.44, "macd_signal": -17.55, "macd_hist": -6.88}, {"date": "2026-06-10", "close": 1258.8, "tenkan": 1308.55, "kijun": 1360.46, "span_a": 1380.57, "span_b": 1375.34, "macd": -26.38, "macd_signal": -19.32, "macd_hist": -7.06}, {"date": "2026-06-11", "close": 1263.0, "tenkan": 1291.28, "kijun": 1348.01, "span_a": 1380.57, "span_b": 1375.34, "macd": -27.26, "macd_signal": -20.9, "macd_hist": -6.36}, {"date": "2026-06-12", "close": 1293.0, "tenkan": 1287.44, "kijun": 1344.68, "span_a": 1380.57, "span_b": 1375.34, "macd": -25.25, "macd_signal": -21.77, "macd_hist": -3.48}, {"date": "2026-06-15", "close": 1307.0, "tenkan": 1289.1, "kijun": 1337.31, "span_a": 1392.01, "span_b": 1375.34, "macd": -22.27, "macd_signal": -21.87, "macd_hist": -0.4}, {"date": "2026-06-16", "close": 1328.8, "tenkan": 1293.3, "kijun": 1320.14, "span_a": 1398.24, "span_b": 1375.34, "macd": -17.94, "macd_signal": -21.09, "macd_hist": 3.14}, {"date": "2026-06-17", "close": 1332.7, "tenkan": 1293.6, "kijun": 1312.43, "span_a": 1392.84, "span_b": 1375.34, "macd": -14.04, "macd_signal": -19.68, "macd_hist": 5.64}, {"date": "2026-06-18", "close": 1328.1, "tenkan": 1293.6, "kijun": 1312.43, "span_a": 1391.12, "span_b": 1375.34, "macd": -11.18, "macd_signal": -17.98, "macd_hist": 6.8}, {"date": "2026-06-19", "close": 1309.5, "tenkan": 1295.7, "kijun": 1308.99, "span_a": 1395.85, "span_b": 1375.34, "macd": -10.3, "macd_signal": -16.44, "macd_hist": 6.14}, {"date": "2026-06-22", "close": 1326.5, "tenkan": 1299.05, "kijun": 1308.99, "span_a": 1390.07, "span_b": 1375.34, "macd": -8.14, "macd_signal": -14.78, "macd_hist": 6.64}, {"date": "2026-06-23", "close": 1309.5, "tenkan": 1299.05, "kijun": 1308.99, "span_a": 1387.44, "span_b": 1375.34, "macd": -7.71, "macd_signal": -13.37, "macd_hist": 5.66}, {"date": "2026-06-24", "close": 1313.6, "tenkan": 1303.7, "kijun": 1308.99, "span_a": 1381.44, "span_b": 1375.34, "macd": -6.96, "macd_signal": -12.09, "macd_hist": 5.13}, {"date": "2026-06-25", "close": 1318.1, "tenkan": 1321.2, "kijun": 1308.99, "span_a": 1378.58, "span_b": 1375.34, "macd": -5.93, "macd_signal": -10.85, "macd_hist": 4.92}, {"date": "2026-06-26", "close": 1318.1, "tenkan": 1321.2, "kijun": 1308.99, "span_a": 1374.89, "span_b": 1375.34, "macd": -5.06, "macd_signal": -9.69, "macd_hist": 4.64}, {"date": "2026-06-29", "close": 1301.0, "tenkan": 1318.75, "kijun": 1308.99, "span_a": 1366.31, "span_b": 1375.34, "macd": -5.68, "macd_signal": -8.89, "macd_hist": 3.21}, {"date": "2026-06-30", "close": 1293.9, "tenkan": 1317.45, "kijun": 1307.95, "span_a": 1362.45, "span_b": 1375.34, "macd": -6.67, "macd_signal": -8.45, "macd_hist": 1.78}, {"date": "2026-07-01", "close": 1308.0, "tenkan": 1317.45, "kijun": 1307.95, "span_a": 1362.45, "span_b": 1375.34, "macd": -6.24, "macd_signal": -8.01, "macd_hist": 1.76}, {"date": "2026-07-02", "close": 1303.5, "tenkan": 1317.45, "kijun": 1307.95, "span_a": 1360.73, "span_b": 1375.34, "macd": -6.2, "macd_signal": -7.64, "macd_hist": 1.45}, {"date": "2026-07-03", "close": 1304.0, "tenkan": 1311.5, "kijun": 1307.95, "span_a": 1360.73, "span_b": 1375.34, "macd": -6.05, "macd_signal": -7.33, "macd_hist": 1.27}, {"date": "2026-07-06", "close": 1321.3, "tenkan": 1309.0, "kijun": 1299.05, "span_a": 1360.73, "span_b": 1375.34, "macd": -4.49, "macd_signal": -6.76, "macd_hist": 2.27}, {"date": "2026-07-07", "close": 1308.4, "tenkan": 1309.0, "kijun": 1299.05, "span_a": 1360.73, "span_b": 1375.34, "macd": -4.24, "macd_signal": -6.25, "macd_hist": 2.01}, {"date": "2026-07-08", "close": 1275.9, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1355.01, "span_b": 1375.34, "macd": -6.59, "macd_signal": -6.32, "macd_hist": -0.27}, {"date": "2026-07-09", "close": 1279.8, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1355.01, "span_b": 1375.34, "macd": -8.05, "macd_signal": -6.67, "macd_hist": -1.38}, {"date": "2026-07-10", "close": 1307.8, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1351.43, "span_b": 1375.34, "macd": -6.86, "macd_signal": -6.71, "macd_hist": -0.16}, {"date": "2026-07-13", "close": 1296.9, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1350.9, "span_b": 1375.34, "macd": -6.72, "macd_signal": -6.71, "macd_hist": -0.01}, {"date": "2026-07-14", "close": 1293.0, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1336.93, "span_b": 1362.91, "macd": -6.85, "macd_signal": -6.74, "macd_hist": -0.11}, {"date": "2026-07-15", "close": 1295.5, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1336.08, "span_b": 1362.06, "macd": -6.67, "macd_signal": -6.73, "macd_hist": 0.05}, {"date": "2026-07-16", "close": 1296.6, "tenkan": 1299.8, "kijun": 1299.05, "span_a": 1334.5, "span_b": 1360.51, "macd": -6.37, "macd_signal": -6.65, "macd_hist": 0.28}, {"date": "2026-07-17", "close": 1327.2, "tenkan": 1300.95, "kijun": 1303.7, "span_a": 1319.65, "span_b": 1359.91, "macd": -3.62, "macd_signal": -6.05, "macd_hist": 2.43}, {"date": "2026-07-20", "close": 1323.1, "tenkan": 1308.75, "kijun": 1308.75, "span_a": 1316.06, "span_b": 1359.91, "macd": -1.75, "macd_signal": -5.19, "macd_hist": 3.44}, {"date": "2026-07-21", "close": 1303.7, "tenkan": 1310.05, "kijun": 1308.75, "span_a": 1313.21, "span_b": 1359.91, "macd": -1.81, "macd_signal": -4.51, "macd_hist": 2.7}, {"date": "2026-07-22", "close": 1288.6, "tenkan": 1313.3, "kijun": 1308.75, "span_a": 1306.72, "span_b": 1359.91, "macd": -3.05, "macd_signal": -4.22, "macd_hist": 1.17}, {"date": "2026-07-23", "close": 1272.2, "tenkan": 1306.95, "kijun": 1306.95, "span_a": 1303.01, "span_b": 1359.91, "macd": -5.29, "macd_signal": -4.43, "macd_hist": -0.85}, {"date": "2026-07-24", "close": 1278.0, "tenkan": 1297.85, "kijun": 1297.85, "span_a": 1303.01, "span_b": 1359.91, "macd": -6.52, "macd_signal": -4.85, "macd_hist": -1.67}, {"date": "2026-07-27", "close": 1280.0, "tenkan": 1297.85, "kijun": 1297.85, "span_a": 1302.35, "span_b": 1359.91, "macd": -7.25, "macd_signal": -5.33, "macd_hist": -1.92}, {"date": "2026-07-28", "close": 1267.7, "tenkan": 1297.85, "kijun": 1297.85, "span_a": 1304.02, "span_b": 1359.91, "macd": -8.72, "macd_signal": -6.01, "macd_hist": -2.71}, {"date": "2026-07-29", "close": 1275.9, "tenkan": 1297.85, "kijun": 1297.85, "span_a": 1304.02, "span_b": 1359.91, "macd": -9.12, "macd_signal": -6.63, "macd_hist": -2.49}, {"date": "2026-07-30", "close": 1292.9, "tenkan": 1297.85, "kijun": 1297.85, "span_a": 1306.35, "span_b": 1359.91, "macd": -7.97, "macd_signal": -6.9, "macd_hist": -1.07}, {"date": "2026-07-31", "close": 1307.8, "tenkan": 1288.35, "kijun": 1297.85, "span_a": 1315.1, "span_b": 1359.91, "macd": -5.79, "macd_signal": -6.68, "macd_hist": 0.88}, {"date": "2026-08-03", "close": 1319.0, "tenkan": 1284.4, "kijun": 1297.85, "span_a": 1315.1, "span_b": 1359.91, "macd": -3.13, "macd_signal": -5.97, "macd_hist": 2.84}, {"date": "2026-08-04", "close": 1290.9, "tenkan": 1284.4, "kijun": 1297.85, "span_a": 1313.87, "span_b": 1359.91, "macd": -3.25, "macd_signal": -5.42, "macd_hist": 2.18}, {"date": "2026-08-05", "close": 1280.0, "tenkan": 1284.4, "kijun": 1297.85, "span_a": 1312.7, "span_b": 1359.91, "macd": -4.17, "macd_signal": -5.17, "macd_hist": 1.0}, {"date": "2026-08-06", "close": 1325.0, "tenkan": 1295.55, "kijun": 1297.85, "span_a": 1312.7, "span_b": 1359.91, "macd": -1.26, "macd_signal": -4.39, "macd_hist": 3.13}, {"date": "2026-08-07", "close": 1334.8, "tenkan": 1301.45, "kijun": 1297.85, "span_a": 1312.7, "span_b": 1359.91, "macd": 1.82, "macd_signal": -3.15, "macd_hist": 4.97}, {"date": "2026-08-10", "close": 1327.3, "tenkan": 1302.85, "kijun": 1297.85, "span_a": 1309.72, "span_b": 1359.91, "macd": 3.61, "macd_signal": -1.79, "macd_hist": 5.41}, {"date": "2026-08-11", "close": 1323.9, "tenkan": 1303.55, "kijun": 1297.85, "span_a": 1304.02, "span_b": 1359.91, "macd": 4.71, "macd_signal": -0.49, "macd_hist": 5.2}, {"date": "2026-08-12", "close": 1329.0, "tenkan": 1303.55, "kijun": 1297.85, "span_a": 1304.02, "span_b": 1359.91, "macd": 5.92, "macd_signal": 0.79, "macd_hist": 5.13}, {"date": "2026-08-13", "close": 1317.0, "tenkan": 1303.55, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 5.84, "macd_signal": 1.8, "macd_hist": 4.04}, {"date": "2026-08-14", "close": 1310.0, "tenkan": 1303.55, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 5.15, "macd_signal": 2.47, "macd_hist": 2.68}, {"date": "2026-08-17", "close": 1316.0, "tenkan": 1303.55, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 5.04, "macd_signal": 2.98, "macd_hist": 2.05}, {"date": "2026-08-18", "close": 1322.0, "tenkan": 1309.1, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 5.36, "macd_signal": 3.46, "macd_hist": 1.91}, {"date": "2026-08-19", "close": 1311.0, "tenkan": 1317.55, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 4.68, "macd_signal": 3.7, "macd_hist": 0.98}, {"date": "2026-08-20", "close": 1313.2, "tenkan": 1315.5, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.91, "macd": 4.27, "macd_signal": 3.82, "macd_hist": 0.46}, {"date": "2026-08-21", "close": 1316.0, "tenkan": 1313.55, "kijun": 1297.85, "span_a": 1299.42, "span_b": 1359.86, "macd": 4.13, "macd_signal": 3.88, "macd_hist": 0.25}, {"date": "2026-08-24", "close": 1309.8, "tenkan": 1313.55, "kijun": 1297.85, "span_a": 1302.33, "span_b": 1348.01, "macd": 3.47, "macd_signal": 3.8, "macd_hist": -0.33}, {"date": "2026-08-25", "close": 1317.0, "tenkan": 1313.35, "kijun": 1293.4, "span_a": 1308.75, "span_b": 1344.68, "macd": 3.49, "macd_signal": 3.74, "macd_hist": -0.25}, {"date": "2026-08-26", "close": 1298.0, "tenkan": 1313.3, "kijun": 1293.4, "span_a": 1309.4, "span_b": 1337.31, "macd": 1.95, "macd_signal": 3.38, "macd_hist": -1.43}, {"date": "2026-08-27", "close": 1282.2, "tenkan": 1305.4, "kijun": 1293.4, "span_a": 1311.02, "span_b": 1320.14, "macd": -0.54, "macd_signal": 2.59, "macd_hist": -3.13}, {"date": "2026-08-28", "close": 1287.0, "tenkan": 1304.3, "kijun": 1293.4, "span_a": 1306.95, "span_b": 1312.43, "macd": -2.1, "macd_signal": 1.66, "macd_hist": -3.76}, {"date": "2026-08-31", "close": 1277.0, "tenkan": 1296.3, "kijun": 1301.45, "span_a": 1297.85, "span_b": 1310.73, "macd": -4.1, "macd_signal": 0.5, "macd_hist": -4.6}];
+        const trades_data = [{"Trade #": 1, "Type": "SHORT", "Entry Time": "2026-03-04", "Entry Price": 1323.22, "Initial SL": 1378.95, "Exit Time": "2026-03-05", "Exit Price": 1379.63, "Qty": 26, "Profit/Loss": -1506.86, "Exit Reason": "Stop Loss", "Ichimoku Cond": "STRONG_BEAR", "MACD Cond": "BEARISH", "Current Capital": 98493.14}, {"Trade #": 2, "Type": "SHORT", "Entry Time": "2026-04-07", "Entry Price": 1288.4, "Initial SL": 1357.59, "Exit Time": "2026-04-17", "Exit Price": 1358.27, "Qty": 21, "Profit/Loss": -1507.34, "Exit Reason": "Stop Loss", "Ichimoku Cond": "STRONG_BEAR", "MACD Cond": "BEARISH", "Current Capital": 96985.81}];
+        const equity_data = [{"date": "2025-12-22", "equity": 100000.0}, {"date": "2025-12-23", "equity": 100000.0}, {"date": "2025-12-24", "equity": 100000.0}, {"date": "2025-12-26", "equity": 100000.0}, {"date": "2025-12-29", "equity": 100000.0}, {"date": "2025-12-30", "equity": 100000.0}, {"date": "2025-12-31", "equity": 100000.0}, {"date": "2026-01-01", "equity": 100000.0}, {"date": "2026-01-02", "equity": 100000.0}, {"date": "2026-01-05", "equity": 100000.0}, {"date": "2026-01-06", "equity": 100000.0}, {"date": "2026-01-07", "equity": 100000.0}, {"date": "2026-01-08", "equity": 100000.0}, {"date": "2026-01-09", "equity": 100000.0}, {"date": "2026-01-12", "equity": 100000.0}, {"date": "2026-01-13", "equity": 100000.0}, {"date": "2026-01-14", "equity": 100000.0}, {"date": "2026-01-15", "equity": 100000.0}, {"date": "2026-01-16", "equity": 100000.0}, {"date": "2026-01-19", "equity": 100000.0}, {"date": "2026-01-20", "equity": 100000.0}, {"date": "2026-01-21", "equity": 100000.0}, {"date": "2026-01-22", "equity": 100000.0}, {"date": "2026-01-23", "equity": 100000.0}, {"date": "2026-01-27", "equity": 100000.0}, {"date": "2026-01-28", "equity": 100000.0}, {"date": "2026-01-29", "equity": 100000.0}, {"date": "2026-01-30", "equity": 100000.0}, {"date": "2026-02-02", "equity": 100000.0}, {"date": "2026-02-03", "equity": 100000.0}, {"date": "2026-02-04", "equity": 100000.0}, {"date": "2026-02-05", "equity": 100000.0}, {"date": "2026-02-06", "equity": 100000.0}, {"date": "2026-02-09", "equity": 100000.0}, {"date": "2026-02-10", "equity": 100000.0}, {"date": "2026-02-11", "equity": 100000.0}, {"date": "2026-02-12", "equity": 100000.0}, {"date": "2026-02-13", "equity": 100000.0}, {"date": "2026-02-16", "equity": 100000.0}, {"date": "2026-02-17", "equity": 100000.0}, {"date": "2026-02-18", "equity": 100000.0}, {"date": "2026-02-19", "equity": 100000.0}, {"date": "2026-02-20", "equity": 100000.0}, {"date": "2026-02-23", "equity": 100000.0}, {"date": "2026-02-24", "equity": 100000.0}, {"date": "2026-02-25", "equity": 100000.0}, {"date": "2026-02-26", "equity": 100000.0}, {"date": "2026-02-27", "equity": 100000.0}, {"date": "2026-03-02", "equity": 100000.0}, {"date": "2026-03-04", "equity": 99594.58}, {"date": "2026-03-05", "equity": 98445.5}, {"date": "2026-03-06", "equity": 98493.14}, {"date": "2026-03-09", "equity": 98493.14}, {"date": "2026-03-10", "equity": 98493.14}, {"date": "2026-03-11", "equity": 98493.14}, {"date": "2026-03-12", "equity": 98493.14}, {"date": "2026-03-13", "equity": 98493.14}, {"date": "2026-03-16", "equity": 98493.14}, {"date": "2026-03-17", "equity": 98493.14}, {"date": "2026-03-18", "equity": 98493.14}, {"date": "2026-03-19", "equity": 98493.14}, {"date": "2026-03-20", "equity": 98493.14}, {"date": "2026-03-23", "equity": 98493.14}, {"date": "2026-03-24", "equity": 98493.14}, {"date": "2026-03-25", "equity": 98493.14}, {"date": "2026-03-27", "equity": 98493.14}, {"date": "2026-03-30", "equity": 98493.14}, {"date": "2026-04-01", "equity": 98493.14}, {"date": "2026-04-02", "equity": 98493.14}, {"date": "2026-04-06", "equity": 98493.14}, {"date": "2026-04-07", "equity": 98278.94}, {"date": "2026-04-08", "equity": 97375.91}, {"date": "2026-04-09", "equity": 97747.99}, {"date": "2026-04-10", "equity": 97325.74}, {"date": "2026-04-13", "equity": 98059.45}, {"date": "2026-04-15", "equity": 97453.25}, {"date": "2026-04-16", "equity": 97469.98}, {"date": "2026-04-17", "equity": 97016.37}, {"date": "2026-04-20", "equity": 96985.81}, {"date": "2026-04-21", "equity": 96985.81}, {"date": "2026-04-22", "equity": 96985.81}, {"date": "2026-04-23", "equity": 96985.81}, {"date": "2026-04-24", "equity": 96985.81}, {"date": "2026-04-27", "equity": 96985.81}, {"date": "2026-04-28", "equity": 96985.81}, {"date": "2026-04-29", "equity": 96985.81}, {"date": "2026-04-30", "equity": 96985.81}, {"date": "2026-05-01", "equity": 96985.81}, {"date": "2026-05-04", "equity": 96985.81}, {"date": "2026-05-05", "equity": 96985.81}, {"date": "2026-05-06", "equity": 96985.81}, {"date": "2026-05-07", "equity": 96985.81}, {"date": "2026-05-08", "equity": 96985.81}, {"date": "2026-05-11", "equity": 96985.81}, {"date": "2026-05-12", "equity": 96985.81}, {"date": "2026-05-13", "equity": 96985.81}, {"date": "2026-05-14", "equity": 96985.81}, {"date": "2026-05-15", "equity": 96985.81}, {"date": "2026-05-18", "equity": 96985.81}, {"date": "2026-05-19", "equity": 96985.81}, {"date": "2026-05-20", "equity": 96985.81}, {"date": "2026-05-21", "equity": 96985.81}, {"date": "2026-05-22", "equity": 96985.81}, {"date": "2026-05-25", "equity": 96985.81}, {"date": "2026-05-26", "equity": 96985.81}, {"date": "2026-05-27", "equity": 96985.81}, {"date": "2026-05-28", "equity": 96985.81}, {"date": "2026-05-29", "equity": 96985.81}, {"date": "2026-06-01", "equity": 96985.81}, {"date": "2026-06-02", "equity": 96985.81}, {"date": "2026-06-03", "equity": 96985.81}, {"date": "2026-06-04", "equity": 96985.81}, {"date": "2026-06-05", "equity": 96985.81}, {"date": "2026-06-08", "equity": 96985.81}, {"date": "2026-06-09", "equity": 96985.81}, {"date": "2026-06-10", "equity": 96985.81}, {"date": "2026-06-11", "equity": 96985.81}, {"date": "2026-06-12", "equity": 96985.81}, {"date": "2026-06-15", "equity": 96985.81}, {"date": "2026-06-16", "equity": 96985.81}, {"date": "2026-06-17", "equity": 96985.81}, {"date": "2026-06-18", "equity": 96985.81}, {"date": "2026-06-19", "equity": 96985.81}, {"date": "2026-06-22", "equity": 96985.81}, {"date": "2026-06-23", "equity": 96985.81}, {"date": "2026-06-24", "equity": 96985.81}, {"date": "2026-06-25", "equity": 96985.81}, {"date": "2026-06-26", "equity": 96985.81}, {"date": "2026-06-29", "equity": 96985.81}, {"date": "2026-06-30", "equity": 96985.81}, {"date": "2026-07-01", "equity": 96985.81}, {"date": "2026-07-02", "equity": 96985.81}, {"date": "2026-07-03", "equity": 96985.81}, {"date": "2026-07-06", "equity": 96985.81}, {"date": "2026-07-07", "equity": 96985.81}, {"date": "2026-07-08", "equity": 96985.81}, {"date": "2026-07-09", "equity": 96985.81}, {"date": "2026-07-10", "equity": 96985.81}, {"date": "2026-07-13", "equity": 96985.81}, {"date": "2026-07-14", "equity": 96985.81}, {"date": "2026-07-15", "equity": 96985.81}, {"date": "2026-07-16", "equity": 96985.81}, {"date": "2026-07-17", "equity": 96985.81}, {"date": "2026-07-20", "equity": 96985.81}, {"date": "2026-07-21", "equity": 96985.81}, {"date": "2026-07-22", "equity": 96985.81}, {"date": "2026-07-23", "equity": 96985.81}, {"date": "2026-07-24", "equity": 96985.81}, {"date": "2026-07-27", "equity": 96985.81}, {"date": "2026-07-28", "equity": 96985.81}, {"date": "2026-07-29", "equity": 96985.81}, {"date": "2026-07-30", "equity": 96985.81}, {"date": "2026-07-31", "equity": 96985.81}, {"date": "2026-08-03", "equity": 96985.81}, {"date": "2026-08-04", "equity": 96985.81}, {"date": "2026-08-05", "equity": 96985.81}, {"date": "2026-08-06", "equity": 96985.81}, {"date": "2026-08-07", "equity": 96985.81}, {"date": "2026-08-10", "equity": 96985.81}, {"date": "2026-08-11", "equity": 96985.81}, {"date": "2026-08-12", "equity": 96985.81}, {"date": "2026-08-13", "equity": 96985.81}, {"date": "2026-08-14", "equity": 96985.81}, {"date": "2026-08-17", "equity": 96985.81}, {"date": "2026-08-18", "equity": 96985.81}, {"date": "2026-08-19", "equity": 96985.81}, {"date": "2026-08-20", "equity": 96985.81}, {"date": "2026-08-21", "equity": 96985.81}, {"date": "2026-08-24", "equity": 96985.81}, {"date": "2026-08-25", "equity": 96985.81}, {"date": "2026-08-26", "equity": 96985.81}, {"date": "2026-08-27", "equity": 96985.81}, {"date": "2026-08-28", "equity": 96985.81}, {"date": "2026-08-31", "equity": 96985.81}];
+        const exits_breakdown = {"Stop Loss": 2};
+        
+        const labels = raw_historical_data.map(d => d.date);
+        const close_prices = raw_historical_data.map(d => d.close);
+        const tenkan = raw_historical_data.map(d => d.tenkan);
+        const kijun = raw_historical_data.map(d => d.kijun);
+        const span_a = raw_historical_data.map(d => d.span_a);
+        const span_b = raw_historical_data.map(d => d.span_b);
+        const macd = raw_historical_data.map(d => d.macd);
+        const macd_signal = raw_historical_data.map(d => d.macd_signal);
+        const macd_hist = raw_historical_data.map(d => d.macd_hist);
+        
+        const buy_points = [];
+        const sell_points = [];
+        
+        trades_data.forEach(t => {
+            if (t['Type'] === "LONG") {
+                buy_points.push({ x: t['Entry Time'], y: t['Entry Price'] });
+            } else if (t['Type'] === "SHORT") {
+                sell_points.push({ x: t['Entry Time'], y: t['Entry Price'] });
+            }
+        });
+        
+        // 1. Price & Ichimoku Chart
+        const priceCtx = document.getElementById('priceChart').getContext('2d');
+        const priceChart = new Chart(priceCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Close Price',
+                        data: close_prices,
+                        borderColor: '#f8fafc',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Tenkan-sen (Conversion)',
+                        data: tenkan,
+                        borderColor: '#38bdf8', // Blue line
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Kijun-sen (Base)',
+                        data: kijun,
+                        borderColor: '#ef4444', // Red line
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Senkou Span A',
+                        data: span_a,
+                        borderColor: 'rgba(16, 185, 129, 0.3)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Senkou Span B',
+                        data: span_b,
+                        borderColor: 'rgba(239, 68, 68, 0.3)',
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: '-1', 
+                        backgroundColor: 'rgba(16, 185, 129, 0.05)'
+                    },
+                    {
+                        type: 'scatter',
+                        label: 'BUY Enter',
+                        data: buy_points,
+                        backgroundColor: '#10b981',
+                        borderColor: '#064e3b',
+                        borderWidth: 1,
+                        pointStyle: 'triangle',
+                        pointRadius: 8,
+                        rotation: 0
+                    },
+                    {
+                        type: 'scatter',
+                        label: 'SELL Enter',
+                        data: sell_points,
+                        backgroundColor: '#ef4444',
+                        borderColor: '#7f1d1d',
+                        borderWidth: 1,
+                        pointStyle: 'triangle',
+                        pointRadius: 8,
+                        rotation: 180
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8', maxTicksLimit: 15 }
+                    },
+                    y: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#f8fafc', boxWidth: 12 }
+                    }
+                }
+            }
+        });
+
+        // 2. MACD Chart
+        const macdCtx = document.getElementById('macdChart').getContext('2d');
+        const macdChart = new Chart(macdCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'MACD',
+                        data: macd,
+                        borderColor: '#38bdf8', // Blue line
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Signal',
+                        data: macd_signal,
+                        borderColor: '#f97316', // Orange line
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        type: 'bar',
+                        label: 'Histogram',
+                        data: macd_hist,
+                        backgroundColor: macd_hist.map(v => v > 0 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'),
+                        borderColor: macd_hist.map(v => v > 0 ? '#10b981' : '#ef4444'),
+                        borderWidth: 0.8,
+                        barPercentage: 0.9,
+                        categoryPercentage: 0.9
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { display: false }
+                    },
+                    y: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8', font: { size: 10 } }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
+        // 3. Equity Curve Chart
+        const equityCtx = document.getElementById('equityChart').getContext('2d');
+        const equityChart = new Chart(equityCtx, {
+            type: 'line',
+            data: {
+                labels: equity_data.map(d => d.date),
+                datasets: [{
+                    label: 'Account Value ($)',
+                    data: equity_data.map(d => d.equity),
+                    borderColor: '#38bdf8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8', maxTicksLimit: 15 }
+                    },
+                    y: {
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#94a3b8' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#f8fafc' }
+                    }
+                }
+            }
+        });
+        
+        // 4. Exit Reasons Pie Chart
+        const exitCtx = document.getElementById('exitChart').getContext('2d');
+        const exitLabels = Object.keys(exits_breakdown);
+        const exitValues = Object.values(exits_breakdown);
+        const colors = ['#10b981', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6'];
+        
+        const exitChart = new Chart(exitCtx, {
+            type: 'doughnut',
+            data: {
+                labels: exitLabels,
+                datasets: [{
+                    data: exitValues,
+                    backgroundColor: colors.slice(0, exitLabels.length),
+                    borderWidth: 1,
+                    borderColor: '#1e293b'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { color: '#f8fafc', font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

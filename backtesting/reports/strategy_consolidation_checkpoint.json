@@ -1,0 +1,50 @@
+{
+  "checkpoint_id": "checkpoint_20261014_strategy_consolidation_audit",
+  "timestamp": "2026-10-14T11:00:00+05:30",
+  "audit_type": "CONTROLLED_STRATEGY_CONSOLIDATION_AUDIT",
+  "audit_status": "COMPLETED_READ_ONLY",
+  "report_path": "backtesting/reports/AWS_STRATEGY_CONSOLIDATION_AUDIT_20261014.md",
+  "report_sha256": "5f64e461f14302b1f0c42955dcacf7f235f3f9d52332d670b29308c555fb9b40",
+  "inspected_strategies": {
+    "nifty_covered_call": {
+      "script": "strategies/scripts/nifty_covered_call_20261012110856.py",
+      "mode": "ANALYZE",
+      "pids_observed": [96867, 92357],
+      "active_position": "NIFTY27OCT26FUT (+65) + NIFTY27OCT2623100CE (-65)",
+      "live_promotion_ready": false,
+      "blocker": "Missing futures-level stop-loss guard; asymmetric downside crash exposure."
+    },
+    "macdfno": {
+      "script": "strategies/scripts/macdfno_20260902130041.py",
+      "mode": "ANALYZE",
+      "pids_observed": [96815, 92358],
+      "active_position": null,
+      "live_promotion_ready": false,
+      "blocker": "Redundant with Emacrossopen; high margin peak (₹63.6L); missing client-side live mode lockout."
+    },
+    "emacrossopen": {
+      "script": "strategies/scripts/emacrossopen_20260903110443.py",
+      "mode": "ANALYZE",
+      "pids_observed": [96828, 92359],
+      "active_position": null,
+      "live_promotion_ready": false,
+      "blocker": "Requires 180-day out-of-sample forward verification and portfolio position cap (max 2-3)."
+    },
+    "oifno": {
+      "script": "strategies/scripts/oifno_20261013171056.py",
+      "mode": "SHADOW",
+      "pids_observed": [96844, 92360],
+      "active_position": null,
+      "live_promotion_ready": false,
+      "blocker": "Governance locked to Phase 7 Shadow mode."
+    }
+  },
+  "recommended_forward_config": "Option C modified: Nifty Covered Call (Paper) + Emacrossopen (Paper, max 3 positions) + Oifno (Shadow), with Macdfno paused to remove redundancy.",
+  "safety_signoff": {
+    "real_orders_placed": 0,
+    "execution_mode_modified": false,
+    "processes_modified": false,
+    "source_code_modified": false,
+    "compliance_verified": true
+  }
+}

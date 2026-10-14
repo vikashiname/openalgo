@@ -1,0 +1,280 @@
+{
+  "temporal_integrity": {
+    "Baseline_9_26": {
+      "total_trades": 1820,
+      "is_count": 1069,
+      "oos_count": 751,
+      "is_start": "2023-10-04 10:15:00+05:30",
+      "is_end_entry": "2025-06-30 15:15:00+05:30",
+      "is_end_exit": "2025-09-30 13:15:00+05:30",
+      "oos_start_entry": "2025-07-01 10:15:00+05:30",
+      "oos_end_exit": "2026-09-09 09:15:00+05:30",
+      "temporal_overlap": false
+    },
+    "Candidate_10_28": {
+      "total_trades": 1600,
+      "is_count": 943,
+      "oos_count": 657,
+      "is_start": "2023-10-04 10:15:00+05:30",
+      "is_end_entry": "2025-06-30 14:15:00+05:30",
+      "is_end_exit": "2025-09-30 13:15:00+05:30",
+      "oos_start_entry": "2025-07-01 10:15:00+05:30",
+      "oos_end_exit": "2026-09-09 09:15:00+05:30",
+      "temporal_overlap": false
+    }
+  },
+  "reported_additive_reproduction": {
+    "Baseline_9_26": {
+      "trade_count": 1820,
+      "win_rate_pct": 52.36,
+      "profit_factor": 1.044,
+      "expectancy_pct": 0.0495,
+      "total_return_additive_pct": 90.14,
+      "max_dd_additive_percentage_points": 75.66
+    },
+    "Candidate_10_28": {
+      "trade_count": 1600,
+      "win_rate_pct": 53.75,
+      "profit_factor": 1.047,
+      "expectancy_pct": 0.0543,
+      "total_return_additive_pct": 86.93,
+      "max_dd_additive_percentage_points": 113.3
+    }
+  },
+  "true_compounded_portfolio_10pct": {
+    "Baseline_9_26": {
+      "allocation_fraction_per_trade": 0.1,
+      "initial_capital_inr": 1000000.0,
+      "final_equity_inr": 1086822.18,
+      "total_portfolio_return_pct": 8.68,
+      "cagr_pct": 2.88,
+      "max_drawdown_pct": 9.34,
+      "sharpe_ratio": 0.41,
+      "profit_factor": 1.044,
+      "win_rate_pct": 52.36,
+      "trade_count": 1820,
+      "years": 2.93,
+      "gates_passed": "4 / 7",
+      "gates_detail": [
+        {
+          "name": "1. Sharpe Ratio",
+          "target": "Sharpe >= 1.00",
+          "actual": "0.41",
+          "passed": false
+        },
+        {
+          "name": "2. CAGR",
+          "target": "CAGR >= 7.0%",
+          "actual": "2.88%",
+          "passed": false
+        },
+        {
+          "name": "3. Profit Factor",
+          "target": "Profit Factor >= 1.30",
+          "actual": "1.04",
+          "passed": false
+        },
+        {
+          "name": "4. Maximum Drawdown",
+          "target": "Max DD <= 20.0%",
+          "actual": "9.34%",
+          "passed": true
+        },
+        {
+          "name": "5. Win Rate",
+          "target": "Win Rate >= 40.0%",
+          "actual": "52.4%",
+          "passed": true
+        },
+        {
+          "name": "6. Sample Size",
+          "target": "Trades >= 100",
+          "actual": "1820",
+          "passed": true
+        },
+        {
+          "name": "7. Expectancy",
+          "target": "Expectancy > 0.0%",
+          "actual": "0.0495%",
+          "passed": true
+        }
+      ]
+    },
+    "Candidate_10_28": {
+      "allocation_fraction_per_trade": 0.1,
+      "initial_capital_inr": 1000000.0,
+      "final_equity_inr": 1083900.77,
+      "total_portfolio_return_pct": 8.39,
+      "cagr_pct": 2.79,
+      "max_drawdown_pct": 10.27,
+      "sharpe_ratio": 0.42,
+      "profit_factor": 1.047,
+      "win_rate_pct": 53.75,
+      "trade_count": 1600,
+      "years": 2.93,
+      "gates_passed": "4 / 7",
+      "gates_detail": [
+        {
+          "name": "1. Sharpe Ratio",
+          "target": "Sharpe >= 1.00",
+          "actual": "0.42",
+          "passed": false
+        },
+        {
+          "name": "2. CAGR",
+          "target": "CAGR >= 7.0%",
+          "actual": "2.79%",
+          "passed": false
+        },
+        {
+          "name": "3. Profit Factor",
+          "target": "Profit Factor >= 1.30",
+          "actual": "1.05",
+          "passed": false
+        },
+        {
+          "name": "4. Maximum Drawdown",
+          "target": "Max DD <= 20.0%",
+          "actual": "10.27%",
+          "passed": true
+        },
+        {
+          "name": "5. Win Rate",
+          "target": "Win Rate >= 40.0%",
+          "actual": "53.8%",
+          "passed": true
+        },
+        {
+          "name": "6. Sample Size",
+          "target": "Trades >= 100",
+          "actual": "1600",
+          "passed": true
+        },
+        {
+          "name": "7. Expectancy",
+          "target": "Expectancy > 0.0%",
+          "actual": "0.0543%",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "true_compounded_portfolio_5pct": {
+    "Baseline_9_26": {
+      "allocation_fraction_per_trade": 0.05,
+      "initial_capital_inr": 1000000.0,
+      "final_equity_inr": 1044302.98,
+      "total_portfolio_return_pct": 4.43,
+      "cagr_pct": 1.49,
+      "max_drawdown_pct": 4.75,
+      "sharpe_ratio": 0.43,
+      "profit_factor": 1.044,
+      "win_rate_pct": 52.36,
+      "trade_count": 1820,
+      "years": 2.93,
+      "gates_passed": "4 / 7",
+      "gates_detail": [
+        {
+          "name": "1. Sharpe Ratio",
+          "target": "Sharpe >= 1.00",
+          "actual": "0.43",
+          "passed": false
+        },
+        {
+          "name": "2. CAGR",
+          "target": "CAGR >= 7.0%",
+          "actual": "1.49%",
+          "passed": false
+        },
+        {
+          "name": "3. Profit Factor",
+          "target": "Profit Factor >= 1.30",
+          "actual": "1.04",
+          "passed": false
+        },
+        {
+          "name": "4. Maximum Drawdown",
+          "target": "Max DD <= 20.0%",
+          "actual": "4.75%",
+          "passed": true
+        },
+        {
+          "name": "5. Win Rate",
+          "target": "Win Rate >= 40.0%",
+          "actual": "52.4%",
+          "passed": true
+        },
+        {
+          "name": "6. Sample Size",
+          "target": "Trades >= 100",
+          "actual": "1820",
+          "passed": true
+        },
+        {
+          "name": "7. Expectancy",
+          "target": "Expectancy > 0.0%",
+          "actual": "0.0495%",
+          "passed": true
+        }
+      ]
+    },
+    "Candidate_10_28": {
+      "allocation_fraction_per_trade": 0.05,
+      "initial_capital_inr": 1000000.0,
+      "final_equity_inr": 1042764.61,
+      "total_portfolio_return_pct": 4.28,
+      "cagr_pct": 1.44,
+      "max_drawdown_pct": 5.23,
+      "sharpe_ratio": 0.43,
+      "profit_factor": 1.047,
+      "win_rate_pct": 53.75,
+      "trade_count": 1600,
+      "years": 2.93,
+      "gates_passed": "4 / 7",
+      "gates_detail": [
+        {
+          "name": "1. Sharpe Ratio",
+          "target": "Sharpe >= 1.00",
+          "actual": "0.43",
+          "passed": false
+        },
+        {
+          "name": "2. CAGR",
+          "target": "CAGR >= 7.0%",
+          "actual": "1.44%",
+          "passed": false
+        },
+        {
+          "name": "3. Profit Factor",
+          "target": "Profit Factor >= 1.30",
+          "actual": "1.05",
+          "passed": false
+        },
+        {
+          "name": "4. Maximum Drawdown",
+          "target": "Max DD <= 20.0%",
+          "actual": "5.23%",
+          "passed": true
+        },
+        {
+          "name": "5. Win Rate",
+          "target": "Win Rate >= 40.0%",
+          "actual": "53.8%",
+          "passed": true
+        },
+        {
+          "name": "6. Sample Size",
+          "target": "Trades >= 100",
+          "actual": "1600",
+          "passed": true
+        },
+        {
+          "name": "7. Expectancy",
+          "target": "Expectancy > 0.0%",
+          "actual": "0.0543%",
+          "passed": true
+        }
+      ]
+    }
+  }
+}

@@ -648,5 +648,19 @@ to `main` after every successful push.
 - **React developers** run `cd frontend && npm install && npm run build` (or `npm run dev`) locally, since the local `.gitignore` will not track their output. Build only — tests run in CI.
 - **Feature branches** CI has not built may carry stale or missing `dist/`. Build locally or rebase onto recent `main`.
 
+## Strategy Development & Research Protocol (Directive 5A)
+
+Per [`docs/SOP_STRATEGY_SECURITY_AND_DEPLOYMENT.md`](docs/SOP_STRATEGY_SECURITY_AND_DEPLOYMENT.md), all algorithmic trading development strictly enforces the **Digital-Twin Architecture**:
+
+1. **Research & Backtesting Isolation (`backtesting/<strategy>/`)**:
+   - ALL backtesting, autoresearch, parameter optimization, historical simulation, and exploratory analysis **must strictly occur inside `backtesting/<strategy>/`**.
+   - Research CSV outputs, equity logs, and benchmark reports must reside within the corresponding `backtesting/` folder and **never** in the live folder.
+   - Every live strategy maintains an identical mirror twin in `backtesting/<strategy>/` for local offline testing.
+
+2. **Live Production Hygiene (`strategies/liveonopenalgo/`)**:
+   - `strategies/liveonopenalgo/` is strictly for immutable, verified production code uploaded to AWS EC2 for paper or live trade.
+   - **Never run backtest scripts or dump research CSVs/logs inside `strategies/liveonopenalgo/`**.
+   - Only the core production scripts reside here; zero `.bak` files, zero local logs, and zero manual backups.
+
 Config lives in `.env` (copy from `.sample.env`); `VALID_BROKERS` gates which
 broker plugins load, and plugins are discovered at startup only.

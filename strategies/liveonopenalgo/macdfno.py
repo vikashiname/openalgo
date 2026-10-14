@@ -1,14 +1,43 @@
 """
 ================================================================================
-OpenAlgo Production Multi-Asset MACD Strategy - All NFO Shares (F&O Segment)
+OPENALGO LIVE STRATEGY: MULTI-ASSET NFO MACD CROSSOVER & REGIME ENGINE
 ================================================================================
-Features:
-  - Automated Order Execution via OpenAlgo API (NFO Segment)
-  - Dynamic Discovery of Active Monthly NFO Futures Contracts & Lot Sizes
-  - Real-Time Broker Position Synchronization & Duplicate Entry Protection
-  - Portfolio Concurrency Gate & Risk Management (Max Active Positions)
-  - Strategy Logic: MACD (12, 26, 9) Crossover + 2-Bar Histogram Expansion
-  - Multi-Asset Historical Backtesting with HTML Dashboard & CSV Reports
+File Role            : LIVE_OPENALGO
+Strategy Identifier  : MACD_FNO_V2 (Candidate E / 0.35% Runner Architecture)
+Current Version      : 2.0.0
+Last Modified        : 2026-10-12
+Git Baseline Commit  : 209361f37ab8ae7e8f9de8f16ce37421f616c11f
+Production Approval  : SHADOW / PAPER TRADING ONLY (Phase 7 Governance)
+
+Implementation History:
+  - 2026-10-12 [v1.3.0]: Official Baseline Candidate G (Pure MACD Cross + Asymmetric Universe: TOP_LONGS / TOP_SHORTS) with optional Candidate E runner mode.
+  - 2026-10-12 [v1.2.1]: Added --auto-exit-misaligned option, DB lock retry backoff, and order pacing.
+  - 2026-10-10 [v1.2.0]: Alert deduplication against OpenAlgo subscriber and transition matrix tests.
+  - 2026-10-04 [v1.1.0]: Added Dead-Zone time filters, Long Regime guard (EMA 50/100), and Index lot multiplier.
+
+Current Strategy Specification:
+  1. Timeframe & Indicators:
+     - 1-Hour (1H) completed candles strictly.
+     - MACD: 12 / 26 / 9 with 2-bar histogram expansion confirmation.
+  2. Execution Gates & Universe:
+     - Universe Selection: Asymmetric Alpha Whitelist (TOP_LONGS: 7, TOP_SHORTS: 6).
+     - Time Filter: Dead zones 11:00-11:59 and 14:00-14:59 IST blocked; gaps 09:15-09:44 blocked.
+     - Long Regime Guard: Close must be above 50-EMA (and 100-EMA for weak sectors).
+  3. Risk Management & Exits:
+     - Baseline (Candidate G): Pure MACD opposite signal reversal. No fixed artificial profit targets.
+     - Runner Variant (Candidate E): +3.0% Long / +1.5% Short target + 0.35% trailing runner.
+     - Catastrophe SL: -3.5% emergency stop loss.
+     - Max Active Positions: 20 concurrent positions cap.
+     - Position Misalignment: Observational audit or auto-exit to FLAT via --auto-exit-misaligned.
+  4. Execution Safety:
+     - Execution Mode: STRICTLY PAPER / ANALYZE TRADING MODE ONLY.
+     - Live orders are gated with persistent state recovery across restarts.
+
+Validation Status:
+  - Alert & Reversal Matrix Tests: 12/12 PASSED (python3 -m unittest test_alert_reversal_matrix.py)
+
+Known Limitations & Unresolved Issues:
+  - Historical backtesting module depends on optional yfinance/matplotlib packages.
 ================================================================================
 """
 
@@ -50,6 +79,12 @@ import requests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 try:
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv(), override=False)
+except ImportError:
+    pass
+
+try:
     from openalgo import api
     client_available = True
 except ImportError:
@@ -68,9 +103,10 @@ from logging.handlers import RotatingFileHandler
 # LOGGING SETUP (PHASE A: CONSOLE + ROTATING FILE HANDLER)
 # ==============================================================================
 SCRIPT_DIR = Path(__file__).resolve().parent
-LOG_FILE_PATH = Path(os.getenv("LOG_FILE", SCRIPT_DIR / "macd_fno.log"))
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+LOG_FILE_PATH = Path(os.getenv("LOG_FILE", PROJECT_ROOT / "log/strategies/macd_fno.log" if (PROJECT_ROOT / "log").exists() else SCRIPT_DIR / "macd_fno.log"))
 STATE_FILE_PATH = Path(os.getenv("STATE_FILE", SCRIPT_DIR / "macdfno_state.json"))
-HEARTBEAT_FILE_PATH = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "heartbeat.json"))
+HEARTBEAT_FILE_PATH = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "macdfno_heartbeat.json"))
 
 logger = logging.getLogger("MACD_FNO_BOT")
 logger.setLevel(logging.INFO)
@@ -122,7 +158,7 @@ class PersistentStateManager:
     def _default_state(self) -> Dict[str, Any]:
         return {
             "version": "1.0",
-            "strategy": os.getenv("STRATEGY_NAME", "MACD_FNO_V1"),
+            "strategy": os.getenv("STRATEGY_NAME", "MACD_FNO_V2"),
             "last_saved_at": None,
             "last_processed_candles": {},
             "tracked_positions": {},
@@ -134,7 +170,7 @@ class PersistentStateManager:
         """Atomic write: writes to temp file then atomic rename to prevent corruption on crash."""
         try:
             self.state["last_saved_at"] = datetime.now().isoformat()
-            temp_file = self.state_file.with_suffix(".tmp")
+            temp_file = self.state_file.with_suffix(f".tmp.{os.getpid()}")
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(self.state, f, indent=2, default=str)
             temp_file.replace(self.state_file)
@@ -220,10 +256,7 @@ class PersistentStateManager:
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
-OPENALGO_API_KEY = os.getenv(
-    "OPENALGO_API_KEY",
-    "a93a6d4254acb477c693e0776b9c34ef4f129d0a94a4c1c100235186f8e1a41e",
-)
+OPENALGO_API_KEY = os.getenv("OPENALGO_API_KEY", "")
 OPENALGO_HOST = os.getenv("OPENALGO_HOST")
 if not OPENALGO_HOST:
     host_server = os.getenv("HOST_SERVER", "")
@@ -332,7 +365,7 @@ def format_trade_alert(data: Dict[str, Any]) -> str:
     exec_time = data.get("execution_time") or datetime.now().strftime("%H:%M:%S")
     pos_before = data.get("pos_before", 0)
     pos_after = data.get("pos_after", qty if action == "BUY" else -qty)
-    strategy_name = data.get("strategy_name", "MACD_FNO_V1")
+    strategy_name = data.get("strategy_name", "MACD_FNO_V2")
     trigger_px = data.get("trigger_price", 0.0)
 
     entry_price = data.get("entry_price") or data.get("fill_price") or 0.0
@@ -341,7 +374,7 @@ def format_trade_alert(data: Dict[str, Any]) -> str:
     except (TypeError, ValueError):
         entry_price_val = 0.0
 
-    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "2.0"))
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.5"))
     sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "3.5"))
 
     if entry_price_val > 0:
@@ -422,7 +455,7 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
         pnl_pct = 0.0
         pnl_abs = 0.0
 
-    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "2.0"))
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.5"))
     sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "3.5"))
 
     if entry_price > 0:
@@ -447,6 +480,9 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
     if exit_reason == "TARGET_HIT":
         reason_header = "🎯 TARGET HIT"
         reason_badge = "🎯 <b>TARGET REACHED</b>"
+    elif exit_reason == "RUNNER_HWM_TRAIL":
+        reason_header = "🏃 RUNNER TRAIL HIT"
+        reason_badge = "🏃 <b>HIGH-WATER-MARK TRAILING STOP TRIGGERED</b>"
     elif exit_reason == "CATASTROPHE_SL":
         reason_header = "🛑 CATASTROPHE STOP-LOSS"
         reason_badge = "🛑 <b>EMERGENCY STOP LOSS TRIGGERED</b>"
@@ -488,7 +524,7 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
 
 EXCHANGE = "NFO"
 PRODUCT = os.getenv("PRODUCT", "NRML")
-STRATEGY_NAME = os.getenv("STRATEGY_NAME", "MACD_FNO_V1")
+STRATEGY_NAME = os.getenv("STRATEGY_NAME", "MACD_FNO_V2")
 
 FAST_PERIOD = int(os.getenv("FAST_PERIOD", "12"))
 SLOW_PERIOD = int(os.getenv("SLOW_PERIOD", "26"))
@@ -499,12 +535,31 @@ LOTS = int(os.getenv("LOTS", "1"))
 MAX_ACTIVE_POSITIONS = int(os.getenv("MAX_ACTIVE_POSITIONS", "20"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in ["true", "1", "yes"]
 
+# Asymmetric Universe Whitelist (AutoResearch Champion V3.0 / Candidate G & E)
+TOP_LONGS = {
+    "SUNPHARMA", "BAJAJ-AUTO", "BPCL", "WIPRO", "TATASTEEL",
+    "BAJFINANCE", "NTPC"
+}
+TOP_SHORTS = {
+    "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC",
+    "NIFTY"
+}
+USE_ASYMMETRIC_UNIVERSE = os.getenv("USE_ASYMMETRIC_UNIVERSE", "true").lower() in ["true", "1", "yes"]
+
+# Strategy Baseline Architecture:
+# - Candidate G (Default Baseline): Pure MACD Opposite Signal Cross Reversal. (No artificial targets).
+# - Candidate E (Runner Variant): Target Touch (+3.0% / +1.5%) + 0.35% HWM trailing runner.
+RUNNER_MODE = os.getenv("RUNNER_MODE", "false").lower() in ["true", "1", "yes"]
+RUNNER_TRAIL_PCT = float(os.getenv("RUNNER_TRAIL_PCT", "0.35"))
+
 # Empirical Performance Optimization Parameters (September 2026 Audit)
 ENABLE_TIME_FILTER = os.getenv("ENABLE_TIME_FILTER", "true").lower() in ["true", "1", "yes"]
 ENABLE_REGIME_FILTER = os.getenv("ENABLE_REGIME_FILTER", "true").lower() in ["true", "1", "yes"]
 LONG_PROFIT_TARGET_PCT = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.0"))
-SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "2.0"))
+SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.5"))
 CATASTROPHE_SL_PCT = float(os.getenv("CATASTROPHE_SL_PCT", "3.5"))
+ORDER_PACING_DELAY_SEC = float(os.getenv("ORDER_PACING_DELAY_SEC", "0.25"))
+AUTO_EXIT_MISALIGNED = os.getenv("AUTO_EXIT_MISALIGNED", "false").lower() in ["true", "1", "yes"]
 INDEX_LOT_MULTIPLIER = int(os.getenv("INDEX_LOT_MULTIPLIER", "2"))
 INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"}
 
@@ -630,7 +685,6 @@ NFO_SYMBOLS_MAP = {
     "CROMPTON": {"yf_ticker": "CROMPTON.NS", "lot_size": 1800, "strike_step": 2.5},
     "CUMMINSIND": {"yf_ticker": "CUMMINSIND.NS", "lot_size": 200, "strike_step": 50},
     "DABUR": {"yf_ticker": "DABUR.NS", "lot_size": 1250, "strike_step": 5},
-    "DALBHARAT": {"yf_ticker": "DALBHARAT.NS", "lot_size": 325, "strike_step": 20},
     "DELHIVERY": {"yf_ticker": "DELHIVERY.NS", "lot_size": 2075, "strike_step": 5},
     "DIVISLAB": {"yf_ticker": "DIVISLAB.NS", "lot_size": 100, "strike_step": 50},
     "DIXON": {"yf_ticker": "DIXON.NS", "lot_size": 50, "strike_step": 100},
@@ -639,7 +693,6 @@ NFO_SYMBOLS_MAP = {
     "DRREDDY": {"yf_ticker": "DRREDDY.NS", "lot_size": 625, "strike_step": 10},
     "EICHERMOT": {"yf_ticker": "EICHERMOT.NS", "lot_size": 100, "strike_step": 50},
     "ETERNAL": {"yf_ticker": "ETERNAL.NS", "lot_size": 2425, "strike_step": 2.5},
-    "EXIDEIND": {"yf_ticker": "EXIDEIND.NS", "lot_size": 1800, "strike_step": 2.5},
     "FEDERALBNK": {"yf_ticker": "FEDERALBNK.NS", "lot_size": 5000, "strike_step": 2.5},
     "FINNIFTY": {"yf_ticker": "NIFTY_FIN_SERVICE.NS", "lot_size": 60, "strike_step": 50},
     "FORCEMOT": {"yf_ticker": "FORCEMOT.NS", "lot_size": 25, "strike_step": 500},
@@ -662,7 +715,6 @@ NFO_SYMBOLS_MAP = {
     "HINDPETRO": {"yf_ticker": "HINDPETRO.NS", "lot_size": 2025, "strike_step": 5},
     "HINDUNILVR": {"yf_ticker": "HINDUNILVR.NS", "lot_size": 300, "strike_step": 20},
     "HINDZINC": {"yf_ticker": "HINDZINC.NS", "lot_size": 1225, "strike_step": 5},
-    "HUDCO": {"yf_ticker": "HUDCO.NS", "lot_size": 2775, "strike_step": 2.5},
     "HYUNDAI": {"yf_ticker": "HYUNDAI.NS", "lot_size": 275, "strike_step": 20},
     "ICICIBANK": {"yf_ticker": "ICICIBANK.NS", "lot_size": 700, "strike_step": 10},
     "ICICIGI": {"yf_ticker": "ICICIGI.NS", "lot_size": 325, "strike_step": 20},
@@ -724,7 +776,6 @@ NFO_SYMBOLS_MAP = {
     "NIFTYNXT50": {"yf_ticker": "NIFTY_NEXT_50.NS", "lot_size": 25, "strike_step": 100},
     "NMDC": {"yf_ticker": "NMDC.NS", "lot_size": 6750, "strike_step": 0.5},
     "NTPC": {"yf_ticker": "NTPC.NS", "lot_size": 1500, "strike_step": 2.5},
-    "NUVAMA": {"yf_ticker": "NUVAMA.NS", "lot_size": 500, "strike_step": 20},
     "NYKAA": {"yf_ticker": "NYKAA.NS", "lot_size": 3125, "strike_step": 2.5},
     "OBEROIRLTY": {"yf_ticker": "OBEROIRLTY.NS", "lot_size": 350, "strike_step": 20},
     "OFSS": {"yf_ticker": "OFSS.NS", "lot_size": 75, "strike_step": 100},
@@ -746,15 +797,14 @@ NFO_SYMBOLS_MAP = {
     "POLYCAB": {"yf_ticker": "POLYCAB.NS", "lot_size": 125, "strike_step": 100},
     "POWERGRID": {"yf_ticker": "POWERGRID.NS", "lot_size": 1900, "strike_step": 2.5},
     "POWERINDIA": {"yf_ticker": "POWERINDIA.NS", "lot_size": 50, "strike_step": 250},
-    "PPLPHARMA": {"yf_ticker": "PPLPHARMA.NS", "lot_size": 2625, "strike_step": 2.5},
     "PREMIERENE": {"yf_ticker": "PREMIERENE.NS", "lot_size": 575, "strike_step": 10},
     "PRESTIGE": {"yf_ticker": "PRESTIGE.NS", "lot_size": 450, "strike_step": 20},
     "RBLBANK": {"yf_ticker": "RBLBANK.NS", "lot_size": 3175, "strike_step": 5},
     "RECLTD": {"yf_ticker": "RECLTD.NS", "lot_size": 1400, "strike_step": 2.5},
     "RELIANCE": {"yf_ticker": "RELIANCE.NS", "lot_size": 500, "strike_step": 10},
     "RVNL": {"yf_ticker": "RVNL.NS", "lot_size": 1525, "strike_step": 5},
+    "SAGILITY": {"yf_ticker": "SAGILITY.NS", "lot_size": 12000, "strike_step": 1},
     "SAIL": {"yf_ticker": "SAIL.NS", "lot_size": 4700, "strike_step": 0.5},
-    "SAMMAANCAP": {"yf_ticker": "SAMMAANCAP.NS", "lot_size": 4300, "strike_step": 2.5},
     "SBICARD": {"yf_ticker": "SBICARD.NS", "lot_size": 800, "strike_step": 10},
     "SBILIFE": {"yf_ticker": "SBILIFE.NS", "lot_size": 375, "strike_step": 20},
     "SBIN": {"yf_ticker": "SBIN.NS", "lot_size": 750, "strike_step": 5},
@@ -772,14 +822,12 @@ NFO_SYMBOLS_MAP = {
     "TATAELXSI": {"yf_ticker": "TATAELXSI.NS", "lot_size": 100, "strike_step": 50},
     "TATAPOWER": {"yf_ticker": "TATAPOWER.NS", "lot_size": 1450, "strike_step": 2.5},
     "TATASTEEL": {"yf_ticker": "TATASTEEL.NS", "lot_size": 5500, "strike_step": 0.5},
-    "TATATECH": {"yf_ticker": "TATATECH.NS", "lot_size": 800, "strike_step": 5},
     "TCS": {"yf_ticker": "TCS.NS", "lot_size": 175, "strike_step": 20},
     "TECHM": {"yf_ticker": "TECHM.NS", "lot_size": 600, "strike_step": 20},
     "TIINDIA": {"yf_ticker": "TIINDIA.NS", "lot_size": 200, "strike_step": 20},
     "TITAN": {"yf_ticker": "TITAN.NS", "lot_size": 175, "strike_step": 10},
     "TMPV": {"yf_ticker": "TMPV.NS", "lot_size": 800, "strike_step": 5},
     "TORNTPHARM": {"yf_ticker": "TORNTPHARM.NS", "lot_size": 250, "strike_step": 10},
-    "TORNTPOWER": {"yf_ticker": "TORNTPOWER.NS", "lot_size": 425, "strike_step": 10},
     "TRENT": {"yf_ticker": "TRENT.NS", "lot_size": 100, "strike_step": 50},
     "TVSMOTOR": {"yf_ticker": "TVSMOTOR.NS", "lot_size": 175, "strike_step": 20},
     "ULTRACEMCO": {"yf_ticker": "ULTRACEMCO.NS", "lot_size": 50, "strike_step": 100},
@@ -913,13 +961,15 @@ def resolve_nfo_contract(symbol: str, host: str, api_key: str) -> Tuple[Optional
             for item in fut_items:
                 exp_str = item.get("expiry")
                 if exp_str:
-                    try:
-                        exp_dt = datetime.strptime(exp_str, "%d-%b-%y").replace(hour=23, minute=59)
-                        if exp_dt >= now:
-                            lot = int(item.get("lotsize", fallback_lot))
-                            valid.append((exp_dt, item.get("symbol"), lot))
-                    except Exception:
-                        pass
+                    for fmt in ("%d-%b-%y", "%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d-%B-%y"):
+                        try:
+                            exp_dt = datetime.strptime(exp_str, fmt).replace(hour=23, minute=59)
+                            if exp_dt >= now:
+                                lot = int(item.get("lotsize", fallback_lot))
+                                valid.append((exp_dt, item.get("symbol"), lot))
+                            break
+                        except Exception:
+                            pass
 
             if valid:
                 valid.sort(key=lambda x: x[0])
@@ -931,7 +981,7 @@ def resolve_nfo_contract(symbol: str, host: str, api_key: str) -> Tuple[Optional
     except Exception as e:
         logger.error(f"❌ Search API lookup error for {symbol}: {e}")
 
-    logger.error(f"❌ Failed to dynamically resolve active NFO contract for {symbol}. Symbol will be skipped.")
+    logger.info(f"ℹ️ Unable to dynamically resolve active NFO contract for {symbol}. Symbol will be skipped.")
     return None, None, None
 
 
@@ -967,6 +1017,10 @@ class NFOPortfolioLiveTrader:
         max_active: int = MAX_ACTIVE_POSITIONS,
         host: str = OPENALGO_HOST,
         api_key: str = OPENALGO_API_KEY,
+        auto_exit_misaligned: Optional[bool] = None,
+        use_asymmetric_universe: Optional[bool] = None,
+        runner_mode: Optional[bool] = None,
+        runner_trail_pct: float = RUNNER_TRAIL_PCT,
     ):
         self.symbols = symbols
         self.interval = interval
@@ -974,6 +1028,10 @@ class NFOPortfolioLiveTrader:
         self.max_active = max_active
         self.host = host
         self.api_key = api_key
+        self.auto_exit_misaligned = auto_exit_misaligned if auto_exit_misaligned is not None else AUTO_EXIT_MISALIGNED
+        self.use_asymmetric_universe = use_asymmetric_universe if use_asymmetric_universe is not None else USE_ASYMMETRIC_UNIVERSE
+        self.runner_mode = runner_mode if runner_mode is not None else RUNNER_MODE
+        self.runner_trail_pct = runner_trail_pct
         self.running = True
         self.parallel_fetch = os.getenv("PARALLEL_DATA_FETCH", "1").lower() in ("1", "true", "yes")
         self.max_workers = int(os.getenv("MAX_WORKERS", "8"))
@@ -1010,6 +1068,8 @@ class NFOPortfolioLiveTrader:
         logger.info(f"  • Target Symbols ({len(self.symbols)}) : {', '.join(self.symbols)}")
         logger.info(f"  • Timeframe Interval   : {self.interval}")
         logger.info(f"  • Strategy             : MACD({FAST_PERIOD}, {SLOW_PERIOD}, {SIGNAL_PERIOD}) + 2-Bar Expansion")
+        logger.info(f"  • Architecture Mode    : {'Candidate E Runner Mode (+Target & Trail)' if self.runner_mode else 'Candidate G Official Baseline (Pure MACD Cross)'}")
+        logger.info(f"  • Asymmetric Universe  : {'Enabled (TOP_LONGS: ' + str(len(TOP_LONGS)) + ', TOP_SHORTS: ' + str(len(TOP_SHORTS)) + ')' if self.use_asymmetric_universe else 'Disabled (Full Catalog)'}")
         logger.info(f"  • Lots per Position    : {self.lots} Lot(s)")
         logger.info(f"  • Max Active Positions : {self.max_active} Concurrent")
         logger.info(f"  • Data Ingestion Mode  : {'Bounded Parallel (' + str(self.max_workers) + ' workers)' if self.parallel_fetch else 'Sequential'}")
@@ -1045,7 +1105,7 @@ class NFOPortfolioLiveTrader:
                 "last_completed_candle": str(last_candle or self.state_manager.state.get("last_processed_candles", {})),
                 "details": details or {},
             }
-            temp_hb = HEARTBEAT_FILE_PATH.with_suffix(".tmp")
+            temp_hb = HEARTBEAT_FILE_PATH.with_suffix(f".tmp.{os.getpid()}")
             with open(temp_hb, "w", encoding="utf-8") as f:
                 json.dump(hb_data, f, indent=2)
             temp_hb.replace(HEARTBEAT_FILE_PATH)
@@ -1097,6 +1157,16 @@ class NFOPortfolioLiveTrader:
             pnl = float(p.get("pnl", 0.0))
 
             if qty == 0:
+                continue
+
+            # 1. Skip non-futures contracts (e.g. Options CE/PE from option strategies like Covered Call)
+            if contract_sym.endswith("CE") or contract_sym.endswith("PE"):
+                logger.info(f"  ℹ️ [EXTERNAL/OPTION] Skipping {contract_sym} (Options contract not traded by MACDFNO).")
+                continue
+
+            # 2. Skip positions not originated by this strategy
+            if contract_sym not in local_tracked:
+                logger.info(f"  ℹ️ [EXTERNAL POSITION] Skipping {contract_sym} (not in MACDFNO tracked_positions).")
                 continue
 
             pos_dir = "LONG" if qty > 0 else "SHORT"
@@ -1194,20 +1264,37 @@ class NFOPortfolioLiveTrader:
             tracked_map[contract_sym] = record
 
             if alignment == "MISALIGNED":
-                alert_msg = (
-                    f"⚠️ <b>POSITION MISALIGNMENT DETECTED</b>\n\n"
-                    f"• <b>Contract:</b> <code>{contract_sym}</code>\n"
-                    f"• <b>Position:</b> <b>{pos_dir}</b> ({qty} units)\n"
-                    f"• <b>Entry Price:</b> ₹{avg_px:.2f}\n"
-                    f"• <b>Current LTP:</b> ₹{ltp:.2f} (P&L: ₹{pnl:,.2f})\n"
-                    f"• <b>Completed 1H Candle:</b> {candle_time}\n"
-                    f"• <b>MACD:</b> {curr_macd:+.2f} | <b>Signal:</b> {curr_sig:+.2f} | <b>Hist:</b> {curr_hist:+.2f}\n"
-                    f"• <b>EMA 9:</b> ₹{curr_ema9:.2f} | <b>EMA 26:</b> ₹{curr_ema26:.2f}\n"
-                    f"• <b>Current Market Regime:</b> <b>{regime}</b>\n"
-                    f"• <b>Alignment Status:</b> <b>MISALIGNED</b>\n\n"
-                    f"<i>ℹ️ Note: NO automatic order placed. Observational audit only.</i>"
-                )
-                send_telegram_alert(alert_msg)
+                if getattr(self, "auto_exit_misaligned", AUTO_EXIT_MISALIGNED):
+                    exit_action = "SELL" if pos_dir == "LONG" else "BUY"
+                    logger.info(f"🔄 [AUTO-EXIT MISALIGNED] {base_sym} ({contract_sym}): Exiting {pos_dir} position ({qty}) to FLAT due to regime misalignment.")
+                    resp = self.place_order(base_sym, contract_sym, action=exit_action, quantity=abs(qty), candle_time=candle_time)
+                    if resp:
+                        record["alignment"] = "CLOSED_FLAT"
+                        tracked_map.pop(contract_sym, None)
+                        self.state_manager.record_execution(base_sym, contract_sym, exit_action, abs(qty), candle_time, resp)
+                        exit_msg = (
+                            f"🔄 <b>AUTO-EXIT MISALIGNED POSITION</b>\n\n"
+                            f"• <b>Contract:</b> <code>{contract_sym}</code>\n"
+                            f"• <b>Closed Position:</b> <b>{pos_dir}</b> ({qty} units) -> <b>FLAT</b>\n"
+                            f"• <b>Exit Reason:</b> <code>REGIME_MISALIGNMENT ({regime})</code>\n"
+                            f"• <b>LTP:</b> ₹{ltp:.2f} (P&L: ₹{pnl:,.2f})\n"
+                        )
+                        send_telegram_alert(exit_msg)
+                else:
+                    alert_msg = (
+                        f"⚠️ <b>POSITION MISALIGNMENT DETECTED</b>\n\n"
+                        f"• <b>Contract:</b> <code>{contract_sym}</code>\n"
+                        f"• <b>Position:</b> <b>{pos_dir}</b> ({qty} units)\n"
+                        f"• <b>Entry Price:</b> ₹{avg_px:.2f}\n"
+                        f"• <b>Current LTP:</b> ₹{ltp:.2f} (P&L: ₹{pnl:,.2f})\n"
+                        f"• <b>Completed 1H Candle:</b> {candle_time}\n"
+                        f"• <b>MACD:</b> {curr_macd:+.2f} | <b>Signal:</b> {curr_sig:+.2f} | <b>Hist:</b> {curr_hist:+.2f}\n"
+                        f"• <b>EMA 9:</b> ₹{curr_ema9:.2f} | <b>EMA 26:</b> ₹{curr_ema26:.2f}\n"
+                        f"• <b>Current Market Regime:</b> <b>{regime}</b>\n"
+                        f"• <b>Alignment Status:</b> <b>MISALIGNED</b>\n\n"
+                        f"<i>ℹ️ Note: NO automatic order placed. Observational audit only.</i>"
+                    )
+                    send_telegram_alert(alert_msg)
 
         self.state_manager.update_tracked_positions(tracked_map)
         self.state_manager.record_reconciliation_audit({
@@ -1258,23 +1345,25 @@ class NFOPortfolioLiveTrader:
                         lot = int(item.get("lotsize", 1))
                         if not exp_str:
                             continue
-                        try:
-                            exp_dt = datetime.strptime(exp_str, "%d-%b-%y").replace(hour=23, minute=59)
-                            if exp_dt >= now:
-                                parts = name.rsplit(" ", 4)
-                                base = " ".join(parts[:-4]) if len(parts) >= 5 else name.split()[0]
-                                if base in symbols_to_resolve:
-                                    curr = self.contract_cache.get(base)
-                                    if not curr or (curr.get("expiry_dt") and exp_dt < curr["expiry_dt"]):
-                                        mult = INDEX_LOT_MULTIPLIER if base in INDEX_SYMBOLS else 1
-                                        self.contract_cache[base] = {
-                                            "contract": sym,
-                                            "lot_size": lot,
-                                            "order_qty": self.lots * lot * mult,
-                                            "expiry_dt": exp_dt,
-                                        }
-                        except Exception:
-                            pass
+                        for fmt in ("%d-%b-%y", "%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d-%B-%Y", "%d-%B-%y"):
+                            try:
+                                exp_dt = datetime.strptime(exp_str, fmt).replace(hour=23, minute=59)
+                                if exp_dt >= now:
+                                    parts = name.rsplit(" ", 4)
+                                    base = " ".join(parts[:-4]) if len(parts) >= 5 else name.split()[0]
+                                    if base in symbols_to_resolve:
+                                        curr = self.contract_cache.get(base)
+                                        if not curr or (curr.get("expiry_dt") and exp_dt < curr["expiry_dt"]):
+                                            mult = INDEX_LOT_MULTIPLIER if base in INDEX_SYMBOLS else 1
+                                            self.contract_cache[base] = {
+                                                "contract": sym,
+                                                "lot_size": lot,
+                                                "order_qty": self.lots * lot * mult,
+                                                "expiry_dt": exp_dt,
+                                            }
+                                    break
+                            except Exception:
+                                pass
             except Exception as e:
                 logger.warning(f"⚠️ Bulk contract pre-fetch warning: {e}")
 
@@ -1300,8 +1389,14 @@ class NFOPortfolioLiveTrader:
                         }
                         logger.info(f"✅ Active contract resolved for {s}: {c_sym} (Lot Size: {lot}, Order Qty: {self.lots * lot * mult})")
                     else:
-                        self.contract_cache.pop(s, None)
-                        logger.warning(f"⚠️ Unable to resolve active contract for {s}. Symbol will be skipped.")
+                        self.contract_cache[s] = {
+                            "contract": None,
+                            "lot_size": None,
+                            "order_qty": 0,
+                            "expiry_dt": now + timedelta(hours=24),
+                            "unresolvable": True,
+                        }
+                        logger.info(f"ℹ️ Unable to resolve active NFO contract for {s} (non-F&O). Marked unresolvable.")
             else:
                 s = unresolved[0]
                 c_sym, lot, exp_dt = resolve_nfo_contract(s, self.host, self.api_key)
@@ -1315,10 +1410,25 @@ class NFOPortfolioLiveTrader:
                     }
                     logger.info(f"✅ Active contract resolved for {s}: {c_sym} (Lot Size: {lot}, Order Qty: {self.lots * lot * mult})")
                 else:
-                    self.contract_cache.pop(s, None)
-                    logger.warning(f"⚠️ Unable to resolve active contract for {s}. Symbol will be skipped.")
+                    self.contract_cache[s] = {
+                        "contract": None,
+                        "lot_size": None,
+                        "order_qty": 0,
+                        "expiry_dt": now + timedelta(hours=24),
+                        "unresolvable": True,
+                    }
+                    logger.info(f"ℹ️ Unable to resolve active NFO contract for {s} (non-F&O). Marked unresolvable.")
 
-        logger.info(f"📋 Contract Resolution Complete: {len(self.contract_cache)} active instruments ready.")
+        # Auto-prune unresolvable non-F&O symbols from active scanning universe
+        unresolvable = [s for s in self.symbols if self.contract_cache.get(s, {}).get("unresolvable")]
+        if unresolvable:
+            self.symbols = [s for s in self.symbols if s not in unresolvable]
+            logger.info(
+                f"ℹ️ Auto-pruned {len(unresolvable)} non-F&O instrument(s) from active scan: {sorted(unresolvable)}. "
+                f"Active trading universe: {len(self.symbols)} instruments."
+            )
+
+        logger.info(f"📋 Contract Resolution Complete: {len([k for k, v in self.contract_cache.items() if v.get('contract')])} active instruments ready.")
 
     def fetch_candle_data(self, symbol: str, contract_symbol: str) -> Optional[pd.DataFrame]:
         """
@@ -1608,6 +1718,7 @@ class NFOPortfolioLiveTrader:
         }
         if trigger_price is not None and float(trigger_price) > 0:
             order_kwargs["trigger_price"] = float(trigger_price)
+            order_kwargs["price"] = float(trigger_price)
 
         while attempt < max_attempts:
             attempt += 1
@@ -1631,6 +1742,8 @@ class NFOPortfolioLiveTrader:
 
                     if status in ["success", 200, "COMPLETE"]:
                         self.state_manager.mark_order_resolved(order_key, "FILLED", order_id)
+                        if ORDER_PACING_DELAY_SEC > 0:
+                            time.sleep(ORDER_PACING_DELAY_SEC)
                         return resp
                     elif "auth" in msg or "apikey" in msg or "unauthorized" in msg:
                         # AUTHENTICATION error -> Fatal, do not retry
@@ -1648,6 +1761,9 @@ class NFOPortfolioLiveTrader:
                         logger.error(f"❌ [BROKER REJECTION] {contract_symbol}: {resp.get('message')}. Retries aborted.")
                         self.state_manager.mark_order_resolved(order_key, "REJECTED")
                         return None
+                    elif "sqlite" in msg or "database is locked" in msg or "timeout" in msg or "timed out" in msg:
+                        logger.warning(f"⚠️ [DATABASE LOCK / TIMEOUT] {contract_symbol}: {resp.get('message')}. Backing off {1.0 * attempt}s before retry...")
+                        time.sleep(1.0 * attempt)
                     else:
                         logger.warning(f"⚠️ [TRANSIENT/UNKNOWN STATUS] {contract_symbol}: {resp}")
                 else:
@@ -1665,6 +1781,8 @@ class NFOPortfolioLiveTrader:
                 if found:
                     logger.info(f"✅ [MATCHING ORDER FOUND IN BOOK] Order {order_id} exists with status '{order_status}'. No retry needed.")
                     self.state_manager.mark_order_resolved(order_key, "FILLED", order_id)
+                    if ORDER_PACING_DELAY_SEC > 0:
+                        time.sleep(ORDER_PACING_DELAY_SEC)
                     return {"status": "success", "orderid": order_id, "verified_via": "orderbook"}
                 else:
                     logger.info(f"ℹ️ Order not found in orderbook. Proceeding with controlled retry (Attempt {attempt+1}/{max_attempts})...")
@@ -1673,6 +1791,8 @@ class NFOPortfolioLiveTrader:
         logger.error(f"❌ Order placement failed or status uncertain for {contract_symbol} (Key: {order_key}).")
         self.state_manager.mark_order_resolved(order_key, "FAILED_UNCERTAIN")
         send_telegram_alert(f"⚠️ <b>ORDER STATE UNCERTAIN:</b> {contract_symbol} {action} {quantity} units failed or unconfirmed after verification.")
+        if ORDER_PACING_DELAY_SEC > 0:
+            time.sleep(ORDER_PACING_DELAY_SEC)
         return None
 
     def get_order_fill_price(
@@ -1848,23 +1968,69 @@ class NFOPortfolioLiveTrader:
         exit_qty = abs(pos_qty)
 
         if pos_qty > 0:  # LONG
-            long_target = entry_price * (1.0 + (LONG_PROFIT_TARGET_PCT / 100.0))
             long_sl = entry_price * (1.0 - (CATASTROPHE_SL_PCT / 100.0))
             if last_low <= long_sl:
                 exit_action = "SELL"
                 exit_reason = "CATASTROPHE_SL"
-            elif last_high >= long_target:
-                exit_action = "SELL"
-                exit_reason = "TARGET_HIT"
+            elif self.runner_mode:
+                # Candidate E Runner Mode: Trail 0.35% after target touch
+                long_target = entry_price * (1.0 + (LONG_PROFIT_TARGET_PCT / 100.0))
+                runner_active = tracked.get("runner_active", False)
+                peak_price = float(tracked.get("peak_price", 0.0) or last_high)
+
+                if runner_active:
+                    if last_high > peak_price:
+                        peak_price = last_high
+                        tracked["peak_price"] = peak_price
+                    trail_sl = peak_price * (1.0 - (self.runner_trail_pct / 100.0))
+                    tracked["effective_trail_sl"] = round(trail_sl, 2)
+                    self.state_manager.update_tracked_positions(self.state_manager.state.get("tracked_positions", {}))
+                    if last_low <= trail_sl:
+                        exit_action = "SELL"
+                        exit_reason = "RUNNER_HWM_TRAIL"
+                elif last_high >= long_target:
+                    # Activate runner on target reach
+                    tracked["runner_active"] = True
+                    tracked["peak_price"] = max(peak_price, last_high)
+                    trail_sl = tracked["peak_price"] * (1.0 - (self.runner_trail_pct / 100.0))
+                    tracked["effective_trail_sl"] = round(trail_sl, 2)
+                    self.state_manager.update_tracked_positions(self.state_manager.state.get("tracked_positions", {}))
+                    logger.info(
+                        f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Long Target {LONG_PROFIT_TARGET_PCT}% reached | "
+                        f"Peak: ₹{tracked['peak_price']:.2f} | HWM Trail SL: ₹{trail_sl:.2f} (-{self.runner_trail_pct}%)"
+                    )
         elif pos_qty < 0:  # SHORT
-            short_target = entry_price * (1.0 - (SHORT_PROFIT_TARGET_PCT / 100.0))
             short_sl = entry_price * (1.0 + (CATASTROPHE_SL_PCT / 100.0))
             if last_high >= short_sl:
                 exit_action = "BUY"
                 exit_reason = "CATASTROPHE_SL"
-            elif last_low <= short_target:
-                exit_action = "BUY"
-                exit_reason = "TARGET_HIT"
+            elif self.runner_mode:
+                # Candidate E Runner Mode: Trail 0.35% after target touch
+                short_target = entry_price * (1.0 - (SHORT_PROFIT_TARGET_PCT / 100.0))
+                runner_active = tracked.get("runner_active", False)
+                trough_price = float(tracked.get("trough_price", 0.0) or last_low)
+
+                if runner_active:
+                    if last_low < trough_price:
+                        trough_price = last_low
+                        tracked["trough_price"] = trough_price
+                    trail_sl = trough_price * (1.0 + (self.runner_trail_pct / 100.0))
+                    tracked["effective_trail_sl"] = round(trail_sl, 2)
+                    self.state_manager.update_tracked_positions(self.state_manager.state.get("tracked_positions", {}))
+                    if last_high >= trail_sl:
+                        exit_action = "BUY"
+                        exit_reason = "RUNNER_HWM_TRAIL"
+                elif last_low <= short_target:
+                    # Activate runner on target reach
+                    tracked["runner_active"] = True
+                    tracked["trough_price"] = min(trough_price, last_low)
+                    trail_sl = tracked["trough_price"] * (1.0 + (self.runner_trail_pct / 100.0))
+                    tracked["effective_trail_sl"] = round(trail_sl, 2)
+                    self.state_manager.update_tracked_positions(self.state_manager.state.get("tracked_positions", {}))
+                    logger.info(
+                        f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Short Target {SHORT_PROFIT_TARGET_PCT}% reached | "
+                        f"Trough: ₹{tracked['trough_price']:.2f} | HWM Trail SL: ₹{trail_sl:.2f} (+{self.runner_trail_pct}%)"
+                    )
 
         if exit_action and exit_qty > 0:
             logger.info(f"🎯 [RISK EXIT TRIGGERED] {symbol} ({contract_sym}): {exit_reason} | Pos: {pos_qty} | Entry: ₹{entry_price:.2f} | Close: ₹{last_close:.2f} | Action: {exit_action} {exit_qty}")
@@ -1990,6 +2156,10 @@ class NFOPortfolioLiveTrader:
             # Case 1: BUY Signal
             if sig == "BUY":
                 if pos == 0:
+                    if self.use_asymmetric_universe and sym not in TOP_LONGS:
+                        logger.info(f"⏸️ [ASYMMETRIC UNIVERSE] Skipping NEW LONG for {sym}: not in TOP_LONGS ({', '.join(sorted(TOP_LONGS))})")
+                        continue
+
                     time_ok, time_reason = is_entry_time_allowed()
                     if not time_ok:
                         logger.info(f"⏸️ [TIME FILTER] Skipping NEW LONG for {sym}: {time_reason}")
@@ -2027,8 +2197,10 @@ class NFOPortfolioLiveTrader:
                     time_ok, time_reason = is_entry_time_allowed()
                     df_sym = c.get("df")
                     regime_ok, regime_reason = is_long_regime_allowed(sym, df_sym)
+                    universe_ok = (not self.use_asymmetric_universe) or (sym in TOP_LONGS)
+                    block_reason = time_reason if not time_ok else (regime_reason if not regime_ok else "NOT_IN_TOP_LONGS")
 
-                    if time_ok and regime_ok:
+                    if time_ok and regime_ok and universe_ok:
                         logger.info(f"🔄 [REVERSE SHORT->LONG] Reversing short position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
                         reverse_qty = abs(pos) + order_qty
                         resp = self.place_order(sym, contract_sym, action="BUY", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
@@ -2070,7 +2242,7 @@ class NFOPortfolioLiveTrader:
                             # 3. New LONG trade alert
                             self.dispatch_trade_alert(sym, contract_sym, "BUY", "LONG", pos, order_qty, candle_time, trigger_price, resp, c)
                     else:
-                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing SHORT pos ({pos}) to FLAT (opposite entry blocked: {time_reason if not time_ok else regime_reason}). Order Qty = {abs(pos)}")
+                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing SHORT pos ({pos}) to FLAT (opposite entry blocked: {block_reason}). Order Qty = {abs(pos)}")
                         resp = self.place_order(sym, contract_sym, action="BUY", quantity=abs(pos), candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
                             self.last_processed_candle[sym] = str(candle_time)
@@ -2102,6 +2274,10 @@ class NFOPortfolioLiveTrader:
             # Case 2: SELL Signal
             elif sig == "SELL":
                 if pos == 0:
+                    if self.use_asymmetric_universe and sym not in TOP_SHORTS:
+                        logger.info(f"⏸️ [ASYMMETRIC UNIVERSE] Skipping NEW SHORT for {sym}: not in TOP_SHORTS ({', '.join(sorted(TOP_SHORTS))})")
+                        continue
+
                     time_ok, time_reason = is_entry_time_allowed()
                     if not time_ok:
                         logger.info(f"⏸️ [TIME FILTER] Skipping NEW SHORT for {sym}: {time_reason}")
@@ -2131,7 +2307,10 @@ class NFOPortfolioLiveTrader:
                         logger.info(f"⏸️ [RISK GATE] Max active positions ({self.max_active}) reached. Skipping {sym}.")
                 elif pos > 0:
                     time_ok, time_reason = is_entry_time_allowed()
-                    if time_ok:
+                    universe_ok = (not self.use_asymmetric_universe) or (sym in TOP_SHORTS)
+                    block_reason = time_reason if not time_ok else "NOT_IN_TOP_SHORTS"
+
+                    if time_ok and universe_ok:
                         logger.info(f"🔄 [REVERSE LONG->SHORT] Reversing long position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
                         reverse_qty = pos + order_qty
                         resp = self.place_order(sym, contract_sym, action="SELL", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
@@ -2173,7 +2352,7 @@ class NFOPortfolioLiveTrader:
                             # 3. New SHORT trade alert
                             self.dispatch_trade_alert(sym, contract_sym, "SELL", "SHORT", pos, order_qty, candle_time, trigger_price, resp, c)
                     else:
-                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing LONG pos ({pos}) to FLAT (opposite entry blocked: {time_reason}). Order Qty = {pos}")
+                        logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing LONG pos ({pos}) to FLAT (opposite entry blocked: {block_reason}). Order Qty = {pos}")
                         resp = self.place_order(sym, contract_sym, action="SELL", quantity=pos, candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
                             self.last_processed_candle[sym] = str(candle_time)
@@ -2648,6 +2827,30 @@ def main():
         default=60,
         help="Seconds between execution scans in continuous live mode (default: 60).",
     )
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        default=False,
+        help="Run startup position reconciliation audit and exit immediately without placing orders.",
+    )
+    parser.add_argument(
+        "--auto-exit-misaligned",
+        action="store_true",
+        default=AUTO_EXIT_MISALIGNED,
+        help="Automatically exit positions detected as misaligned with current market regime to FLAT.",
+    )
+    parser.add_argument(
+        "--disable-asymmetric-universe",
+        action="store_true",
+        default=False,
+        help="Disable TOP_LONGS/TOP_SHORTS universe restriction and trade all NFO symbols.",
+    )
+    parser.add_argument(
+        "--runner-mode",
+        action="store_true",
+        default=RUNNER_MODE,
+        help="Enable Candidate E variant (+Target & 0.35%% trailing runner) instead of Candidate G pure cross.",
+    )
     args = parser.parse_args()
 
     if args.mode == "backtest":
@@ -2662,7 +2865,14 @@ def main():
         interval=args.interval,
         lots=args.lots,
         max_active=args.max_active,
+        auto_exit_misaligned=args.auto_exit_misaligned,
+        use_asymmetric_universe=not args.disable_asymmetric_universe,
+        runner_mode=args.runner_mode,
     )
+
+    if args.reconcile_only:
+        logger.info("Reconciliation audit complete (--reconcile-only). Exiting cleanly.")
+        return
 
     if args.run_once:
         logger.info("🚀 Running single portfolio evaluation cycle (--run-once)...")

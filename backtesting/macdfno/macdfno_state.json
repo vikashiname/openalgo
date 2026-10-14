@@ -1,0 +1,14 @@
+{
+  "tracked_positions": {},
+  "last_processed_candles": {},
+  "sent_alerts": [],
+  "recent_executions": [],
+  "in_flight_orders": {},
+  "last_reconciliation_audit": {
+    "timestamp": "2026-10-13T00:00:00+05:30",
+    "summary": {
+      "status": "RESET_CLEAN_FLAT",
+      "reason": "Candidate G Baseline Upgrade"
+    }
+  }
+}

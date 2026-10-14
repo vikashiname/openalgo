@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMA Crossover Quantitative Audit & Research Report</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .metric-box { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .metric-box.highlight { border-left: 4px solid #0d6efd; }
+        .metric-title { font-size: 0.85rem; color: #6c757d; text-transform: uppercase; font-weight: 600; }
+        .metric-val { font-size: 1.5rem; font-weight: 700; margin-top: 5px; }
+        .badge-success { background-color: #198754; }
+        .badge-warning { background-color: #ffc107; color: black; }
+        .badge-danger { background-color: #dc3545; }
+        .badge-info { background-color: #0dcaf0; color: black; }
+        .badge-primary { background-color: #0d6efd; }
+    </style>
+</head>
+<body class="py-4">
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h2 mb-1">🔬 Quantitative Strategy Audit & Research Report</h1>
+            <p class="text-muted mb-0">Strategy: EMA Crossover (Fast: 9, Slow: 21) | Multi-Asset Commodity Suite</p>
+        </div>
+        <div class="text-end">
+            <span class="badge bg-secondary">Report Date: 2026-08-27 22:18:03</span>
+        </div>
+    </div>
+
+    <!-- Executive Summary Table -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">📋 Executive Multi-Asset Baseline & Corrected Performance</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Commodity</th>
+                            <th>Flawed Return</th>
+                            <th>Corrected Return</th>
+                            <th>CAGR</th>
+                            <th>Max Drawdown</th>
+                            <th>Sharpe (Rf=4.5%)</th>
+                            <th>Profit Factor</th>
+                            <th>Walk-Forward Efficiency</th>
+                            <th>Recommendation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+        <tr>
+            <td><strong>Crude Oil (WTI) Futures</strong> (CL=F)</td>
+            <td>-68.17%</td>
+            <td><strong>-77.50%</strong></td>
+            <td>-39.20%</td>
+            <td>87.01%</td>
+            <td>-0.20</td>
+            <td> 0.47</td>
+            <td> 0.00</td>
+            <td><span class="badge badge-danger">REJECT STRATEGY (High Chop)</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Gold Futures (COMEX)</strong> (GC=F)</td>
+            <td>+1048.95%</td>
+            <td><strong>+572.35%</strong></td>
+            <td>+88.82%</td>
+            <td>33.86%</td>
+            <td> 1.35</td>
+            <td> 3.09</td>
+            <td> 0.00</td>
+            <td><span class="badge badge-primary">ADD VOLUME FILTER</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Silver Futures (COMEX)</strong> (SI=F)</td>
+            <td>+57.18%</td>
+            <td><strong>+87.53%</strong></td>
+            <td>+23.33%</td>
+            <td>71.47%</td>
+            <td> 0.62</td>
+            <td> 1.25</td>
+            <td> 0.00</td>
+            <td><span class="badge badge-primary">ADD VOLUME FILTER</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Natural Gas Futures (NYMEX)</strong> (NG=F)</td>
+            <td>-87.06%</td>
+            <td><strong>-85.83%</strong></td>
+            <td>-47.89%</td>
+            <td>93.75%</td>
+            <td>-0.01</td>
+            <td> 0.46</td>
+            <td> 0.00</td>
+            <td><span class="badge badge-danger">REJECT STRATEGY (High Chop)</span></td>
+        </tr>
+        
+        <tr>
+            <td><strong>Brent Crude Oil Futures</strong> (BZ=F)</td>
+            <td>-69.59%</td>
+            <td><strong>-68.92%</strong></td>
+            <td>-32.28%</td>
+            <td>86.90%</td>
+            <td>-0.16</td>
+            <td> 0.40</td>
+            <td> 0.00</td>
+            <td><span class="badge badge-info">ADD RISK-MANAGEMENT FILTER (Trailing ATR)</span></td>
+        </tr>
+        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detailed Asset Sections -->
+    <h3 class="h4 mb-3">🔍 Deep-Dive Asset Analytics & Robustness Testing</h3>
+    
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📦 Crude Oil (WTI) Futures (CL=F)</h4>
+                <span class="badge badge-danger fs-6">REJECT STRATEGY (High Chop)</span>
+            </div>
+            <div class="card-body">
+                <!-- Audit Delta Cards -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Flawed Return (Lookahead)</div>
+                            <div class="metric-val text-muted">-68.17%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box highlight">
+                            <div class="metric-title">Corrected Real Return</div>
+                            <div class="metric-val">-77.50%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Max Drawdown</div>
+                            <div class="metric-val text-danger">87.01%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Annualized Sharpe (Rf=4.5%)</div>
+                            <div class="metric-val">-0.20</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for in-depth analysis -->
+                <ul class="nav nav-tabs" id="tab-CL_F" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#sens-CL_F">1. Parameter Plateaus</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#oos-CL_F">2. Out-of-Sample (60/20/20)</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reg-CL_F">3. Regime Breakdown</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#vol-CL_F">4. Volume Filters</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#risk-CL_F">5. Risk Management</a></li>
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Tab 1: Robust Regions -->
+                    <div class="tab-pane fade show active" id="sens-CL_F">
+                        <h5>Top Robust Parameter Plateaus (Sensitivity Grid)</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>EMA Pair</th><th>CAGR</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Neighborhood Mean</th><th>Stability Score</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 2: Out of Sample -->
+                    <div class="tab-pane fade" id="oos-CL_F">
+                        <h5>Out-of-Sample Performance Degradation</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>In-Sample (60%)</h6>
+                                    <p>CAGR: <strong>-2.37%</strong> | Sharpe: <strong> 0.20</strong></p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>Out-of-Sample (20% Untouched)</h6>
+                                    <p>CAGR: <strong>+64.21%</strong> | Sharpe: <strong> 1.01</strong></p>
+                                    <small class="text-muted">Sharpe Degradation: +404.9%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Regime Breakdown -->
+                    <div class="tab-pane fade" id="reg-CL_F">
+                        <h5>Strategy Performance by Market Regime</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead><tr><th>Regime Type</th><th>State</th><th>Trades</th><th>Win Rate</th><th>Net P&L</th><th>Profit Factor</th></tr></thead>
+                            <tbody>
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bear Trend</strong></td>
+                    <td>3</td>
+                    <td> 66.7%</td>
+                    <td>$+13,183.99</td>
+                    <td> 1.76</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Sideways / Chop</strong></td>
+                    <td>10</td>
+                    <td> 20.0%</td>
+                    <td>$-97,298.04</td>
+                    <td> 0.05</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Transitional</strong></td>
+                    <td>1</td>
+                    <td>100.0%</td>
+                    <td>$+29,026.00</td>
+                    <td>99.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>2</td>
+                    <td> 50.0%</td>
+                    <td>$-21,626.00</td>
+                    <td> 0.18</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>High Volatility</strong></td>
+                    <td>3</td>
+                    <td>  0.0%</td>
+                    <td>$-56,431.99</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Low Volatility</strong></td>
+                    <td>2</td>
+                    <td>  0.0%</td>
+                    <td>$-29,206.01</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Medium Volatility</strong></td>
+                    <td>10</td>
+                    <td> 50.0%</td>
+                    <td>$+4,093.97</td>
+                    <td> 1.07</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>1</td>
+                    <td>100.0%</td>
+                    <td>$+4,829.99</td>
+                    <td>99.00</td>
+                </tr>
+                </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 4: Volume Filters -->
+                    <div class="tab-pane fade" id="vol-CL_F">
+                        <h5>Volume Filter Comparison</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (No Filter)</td>
+                <td>-77.50%</td>
+                <td>87.01%</td>
+                <td>-0.20</td>
+                <td> 0.47</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>2. Vol > 20-SMA Volume</td>
+                <td>+36.42%</td>
+                <td>65.55%</td>
+                <td> 0.42</td>
+                <td> 1.48</td>
+                <td> 42.9%</td>
+                <td>7</td>
+            </tr>
+            
+            <tr>
+                <td>3. RVOL > 1.2 Surge</td>
+                <td>+78.83%</td>
+                <td>42.38%</td>
+                <td> 0.55</td>
+                <td> 3.11</td>
+                <td> 33.3%</td>
+                <td>3</td>
+            </tr>
+            
+            <tr>
+                <td>4. RVOL > 1.5 Breakout</td>
+                <td>-25.28%</td>
+                <td>28.08%</td>
+                <td>-1.39</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>1</td>
+            </tr>
+            
+            <tr>
+                <td>5. Price_Up + Vol_Up Confirmed</td>
+                <td>-25.02%</td>
+                <td>56.41%</td>
+                <td>-0.07</td>
+                <td> 0.62</td>
+                <td> 50.0%</td>
+                <td>4</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 5: Risk Overlays -->
+                    <div class="tab-pane fade" id="risk-CL_F">
+                        <h5>Risk Management Stop-Loss / Take-Profit Overlays</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (Opposite Cross)</td>
+                <td>-76.57%</td>
+                <td>86.44%</td>
+                <td>-0.20</td>
+                <td> 0.48</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>2. Fixed SL (2.0%)</td>
+                <td>-48.50%</td>
+                <td>68.20%</td>
+                <td>-0.22</td>
+                <td> 0.44</td>
+                <td> 17.6%</td>
+                <td>17</td>
+            </tr>
+            
+            <tr>
+                <td>3. Fixed SL (3.5%)</td>
+                <td>-14.15%</td>
+                <td>73.32%</td>
+                <td> 0.27</td>
+                <td> 0.90</td>
+                <td> 29.4%</td>
+                <td>17</td>
+            </tr>
+            
+            <tr>
+                <td>4. ATR Stop (1.5x ATR)</td>
+                <td>-55.17%</td>
+                <td>75.87%</td>
+                <td> 0.03</td>
+                <td> 0.64</td>
+                <td> 31.2%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>5. ATR Stop (2.5x ATR)</td>
+                <td>-56.48%</td>
+                <td>81.25%</td>
+                <td> 0.07</td>
+                <td> 0.65</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>6. Trailing Stop (2.0x ATR)</td>
+                <td>-34.36%</td>
+                <td>58.08%</td>
+                <td>-0.18</td>
+                <td> 0.73</td>
+                <td> 41.2%</td>
+                <td>17</td>
+            </tr>
+            
+            <tr>
+                <td>7. ATR SL + 1:2.5 TP Target</td>
+                <td>-21.24%</td>
+                <td>66.10%</td>
+                <td> 0.22</td>
+                <td> 0.93</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Statistical Assessment:</strong> Commodity exhibits prolonged non-directional mean-reversion causing severe negative drift.
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📦 Gold Futures (COMEX) (GC=F)</h4>
+                <span class="badge badge-primary fs-6">ADD VOLUME FILTER</span>
+            </div>
+            <div class="card-body">
+                <!-- Audit Delta Cards -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Flawed Return (Lookahead)</div>
+                            <div class="metric-val text-muted">+1048.95%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box highlight">
+                            <div class="metric-title">Corrected Real Return</div>
+                            <div class="metric-val">+572.35%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Max Drawdown</div>
+                            <div class="metric-val text-danger">33.86%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Annualized Sharpe (Rf=4.5%)</div>
+                            <div class="metric-val"> 1.35</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for in-depth analysis -->
+                <ul class="nav nav-tabs" id="tab-GC_F" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#sens-GC_F">1. Parameter Plateaus</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#oos-GC_F">2. Out-of-Sample (60/20/20)</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reg-GC_F">3. Regime Breakdown</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#vol-GC_F">4. Volume Filters</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#risk-GC_F">5. Risk Management</a></li>
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Tab 1: Robust Regions -->
+                    <div class="tab-pane fade show active" id="sens-GC_F">
+                        <h5>Top Robust Parameter Plateaus (Sensitivity Grid)</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>EMA Pair</th><th>CAGR</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Neighborhood Mean</th><th>Stability Score</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 2: Out of Sample -->
+                    <div class="tab-pane fade" id="oos-GC_F">
+                        <h5>Out-of-Sample Performance Degradation</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>In-Sample (60%)</h6>
+                                    <p>CAGR: <strong>+122.13%</strong> | Sharpe: <strong> 1.75</strong></p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>Out-of-Sample (20% Untouched)</h6>
+                                    <p>CAGR: <strong>-88.87%</strong> | Sharpe: <strong>-0.50</strong></p>
+                                    <small class="text-muted">Sharpe Degradation: -128.4%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Regime Breakdown -->
+                    <div class="tab-pane fade" id="reg-GC_F">
+                        <h5>Strategy Performance by Market Regime</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead><tr><th>Regime Type</th><th>State</th><th>Trades</th><th>Win Rate</th><th>Net P&L</th><th>Profit Factor</th></tr></thead>
+                            <tbody>
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bull Trend</strong></td>
+                    <td>6</td>
+                    <td> 16.7%</td>
+                    <td>$+66,709.86</td>
+                    <td> 1.48</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Sideways / Chop</strong></td>
+                    <td>6</td>
+                    <td> 66.7%</td>
+                    <td>$+327,265.04</td>
+                    <td>18.89</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>4</td>
+                    <td> 25.0%</td>
+                    <td>$-4,559.99</td>
+                    <td> 0.84</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>High Volatility</strong></td>
+                    <td>3</td>
+                    <td> 33.3%</td>
+                    <td>$+150,064.82</td>
+                    <td> 3.64</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Low Volatility</strong></td>
+                    <td>4</td>
+                    <td> 25.0%</td>
+                    <td>$+30,864.99</td>
+                    <td> 1.98</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Medium Volatility</strong></td>
+                    <td>7</td>
+                    <td> 57.1%</td>
+                    <td>$+228,525.10</td>
+                    <td> 3.93</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>2</td>
+                    <td>  0.0%</td>
+                    <td>$-20,039.99</td>
+                    <td> 0.00</td>
+                </tr>
+                </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 4: Volume Filters -->
+                    <div class="tab-pane fade" id="vol-GC_F">
+                        <h5>Volume Filter Comparison</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (No Filter)</td>
+                <td>+572.35%</td>
+                <td>33.86%</td>
+                <td> 1.35</td>
+                <td> 3.09</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>2. Vol > 20-SMA Volume</td>
+                <td>+34.94%</td>
+                <td>19.79%</td>
+                <td> 0.38</td>
+                <td> 2.63</td>
+                <td> 33.3%</td>
+                <td>3</td>
+            </tr>
+            
+            <tr>
+                <td>3. RVOL > 1.2 Surge</td>
+                <td> -7.83%</td>
+                <td> 9.84%</td>
+                <td>-1.62</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>1</td>
+            </tr>
+            
+            <tr>
+                <td>4. RVOL > 1.5 Breakout</td>
+                <td> -7.83%</td>
+                <td> 9.84%</td>
+                <td>-1.62</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>1</td>
+            </tr>
+            
+            <tr>
+                <td>5. Price_Up + Vol_Up Confirmed</td>
+                <td>+164.36%</td>
+                <td>30.80%</td>
+                <td> 0.97</td>
+                <td> 2.95</td>
+                <td> 33.3%</td>
+                <td>6</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 5: Risk Overlays -->
+                    <div class="tab-pane fade" id="risk-GC_F">
+                        <h5>Risk Management Stop-Loss / Take-Profit Overlays</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (Opposite Cross)</td>
+                <td>+573.22%</td>
+                <td>33.77%</td>
+                <td> 1.35</td>
+                <td> 3.10</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>2. Fixed SL (2.0%)</td>
+                <td>+406.19%</td>
+                <td>38.15%</td>
+                <td> 1.27</td>
+                <td> 2.15</td>
+                <td> 31.2%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>3. Fixed SL (3.5%)</td>
+                <td>+775.49%</td>
+                <td>32.51%</td>
+                <td> 1.48</td>
+                <td> 3.79</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>4. ATR Stop (1.5x ATR)</td>
+                <td>+410.91%</td>
+                <td>37.96%</td>
+                <td> 1.28</td>
+                <td> 2.20</td>
+                <td> 31.2%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>5. ATR Stop (2.5x ATR)</td>
+                <td>+772.82%</td>
+                <td>33.06%</td>
+                <td> 1.47</td>
+                <td> 3.74</td>
+                <td> 37.5%</td>
+                <td>16</td>
+            </tr>
+            
+            <tr>
+                <td>6. Trailing Stop (2.0x ATR)</td>
+                <td>-10.88%</td>
+                <td>25.86%</td>
+                <td>-0.21</td>
+                <td> 0.77</td>
+                <td> 52.9%</td>
+                <td>17</td>
+            </tr>
+            
+            <tr>
+                <td>7. ATR SL + 1:2.5 TP Target</td>
+                <td>+94.05%</td>
+                <td>20.08%</td>
+                <td> 0.76</td>
+                <td> 2.14</td>
+                <td> 41.2%</td>
+                <td>17</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Statistical Assessment:</strong> Volume breakout filter required to avoid false whipsaws.
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📦 Silver Futures (COMEX) (SI=F)</h4>
+                <span class="badge badge-primary fs-6">ADD VOLUME FILTER</span>
+            </div>
+            <div class="card-body">
+                <!-- Audit Delta Cards -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Flawed Return (Lookahead)</div>
+                            <div class="metric-val text-muted">+57.18%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box highlight">
+                            <div class="metric-title">Corrected Real Return</div>
+                            <div class="metric-val">+87.53%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Max Drawdown</div>
+                            <div class="metric-val text-danger">71.47%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Annualized Sharpe (Rf=4.5%)</div>
+                            <div class="metric-val"> 0.62</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for in-depth analysis -->
+                <ul class="nav nav-tabs" id="tab-SI_F" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#sens-SI_F">1. Parameter Plateaus</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#oos-SI_F">2. Out-of-Sample (60/20/20)</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reg-SI_F">3. Regime Breakdown</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#vol-SI_F">4. Volume Filters</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#risk-SI_F">5. Risk Management</a></li>
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Tab 1: Robust Regions -->
+                    <div class="tab-pane fade show active" id="sens-SI_F">
+                        <h5>Top Robust Parameter Plateaus (Sensitivity Grid)</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>EMA Pair</th><th>CAGR</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Neighborhood Mean</th><th>Stability Score</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 2: Out of Sample -->
+                    <div class="tab-pane fade" id="oos-SI_F">
+                        <h5>Out-of-Sample Performance Degradation</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>In-Sample (60%)</h6>
+                                    <p>CAGR: <strong>-4.33%</strong> | Sharpe: <strong> 0.14</strong></p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>Out-of-Sample (20% Untouched)</h6>
+                                    <p>CAGR: <strong>+0.00%</strong> | Sharpe: <strong>-0.74</strong></p>
+                                    <small class="text-muted">Sharpe Degradation: -620.2%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Regime Breakdown -->
+                    <div class="tab-pane fade" id="reg-SI_F">
+                        <h5>Strategy Performance by Market Regime</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead><tr><th>Regime Type</th><th>State</th><th>Trades</th><th>Win Rate</th><th>Net P&L</th><th>Profit Factor</th></tr></thead>
+                            <tbody>
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bull Trend</strong></td>
+                    <td>6</td>
+                    <td> 16.7%</td>
+                    <td>$-48,150.02</td>
+                    <td> 0.18</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Sideways / Chop</strong></td>
+                    <td>14</td>
+                    <td> 42.9%</td>
+                    <td>$+144,789.97</td>
+                    <td> 2.20</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>4</td>
+                    <td>  0.0%</td>
+                    <td>$-41,435.02</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>High Volatility</strong></td>
+                    <td>7</td>
+                    <td>  0.0%</td>
+                    <td>$-136,740.04</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Low Volatility</strong></td>
+                    <td>7</td>
+                    <td> 57.1%</td>
+                    <td>$+222,734.98</td>
+                    <td> 7.37</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Medium Volatility</strong></td>
+                    <td>9</td>
+                    <td> 33.3%</td>
+                    <td>$-18,030.01</td>
+                    <td> 0.50</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>1</td>
+                    <td>  0.0%</td>
+                    <td>$-12,760.01</td>
+                    <td> 0.00</td>
+                </tr>
+                </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 4: Volume Filters -->
+                    <div class="tab-pane fade" id="vol-SI_F">
+                        <h5>Volume Filter Comparison</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (No Filter)</td>
+                <td>+87.53%</td>
+                <td>71.47%</td>
+                <td> 0.62</td>
+                <td> 1.25</td>
+                <td> 29.2%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>2. Vol > 20-SMA Volume</td>
+                <td>-40.09%</td>
+                <td>49.55%</td>
+                <td>-0.38</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>2</td>
+            </tr>
+            
+            <tr>
+                <td>3. RVOL > 1.2 Surge</td>
+                <td>-40.09%</td>
+                <td>49.55%</td>
+                <td>-0.38</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>2</td>
+            </tr>
+            
+            <tr>
+                <td>4. RVOL > 1.5 Breakout</td>
+                <td>-40.09%</td>
+                <td>49.55%</td>
+                <td>-0.38</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>2</td>
+            </tr>
+            
+            <tr>
+                <td>5. Price_Up + Vol_Up Confirmed</td>
+                <td>+130.33%</td>
+                <td>71.16%</td>
+                <td> 0.71</td>
+                <td> 1.83</td>
+                <td> 27.3%</td>
+                <td>11</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 5: Risk Overlays -->
+                    <div class="tab-pane fade" id="risk-SI_F">
+                        <h5>Risk Management Stop-Loss / Take-Profit Overlays</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (Opposite Cross)</td>
+                <td>+88.95%</td>
+                <td>70.50%</td>
+                <td> 0.62</td>
+                <td> 1.26</td>
+                <td> 29.2%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>2. Fixed SL (2.0%)</td>
+                <td> -7.85%</td>
+                <td>64.00%</td>
+                <td> 0.20</td>
+                <td> 0.66</td>
+                <td> 20.8%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>3. Fixed SL (3.5%)</td>
+                <td>+164.33%</td>
+                <td>58.80%</td>
+                <td> 0.77</td>
+                <td> 1.53</td>
+                <td> 25.0%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>4. ATR Stop (1.5x ATR)</td>
+                <td>+78.96%</td>
+                <td>69.42%</td>
+                <td> 0.57</td>
+                <td> 1.19</td>
+                <td> 25.0%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>5. ATR Stop (2.5x ATR)</td>
+                <td>+42.77%</td>
+                <td>76.65%</td>
+                <td> 0.46</td>
+                <td> 1.04</td>
+                <td> 29.2%</td>
+                <td>24</td>
+            </tr>
+            
+            <tr>
+                <td>6. Trailing Stop (2.0x ATR)</td>
+                <td>-67.45%</td>
+                <td>76.37%</td>
+                <td>-0.14</td>
+                <td> 0.56</td>
+                <td> 36.0%</td>
+                <td>25</td>
+            </tr>
+            
+            <tr>
+                <td>7. ATR SL + 1:2.5 TP Target</td>
+                <td>-117.15%</td>
+                <td>137.87%</td>
+                <td>-0.33</td>
+                <td> 0.45</td>
+                <td> 29.2%</td>
+                <td>24</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Statistical Assessment:</strong> Volume breakout filter required to avoid false whipsaws.
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📦 Natural Gas Futures (NYMEX) (NG=F)</h4>
+                <span class="badge badge-danger fs-6">REJECT STRATEGY (High Chop)</span>
+            </div>
+            <div class="card-body">
+                <!-- Audit Delta Cards -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Flawed Return (Lookahead)</div>
+                            <div class="metric-val text-muted">-87.06%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box highlight">
+                            <div class="metric-title">Corrected Real Return</div>
+                            <div class="metric-val">-85.83%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Max Drawdown</div>
+                            <div class="metric-val text-danger">93.75%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Annualized Sharpe (Rf=4.5%)</div>
+                            <div class="metric-val">-0.01</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for in-depth analysis -->
+                <ul class="nav nav-tabs" id="tab-NG_F" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#sens-NG_F">1. Parameter Plateaus</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#oos-NG_F">2. Out-of-Sample (60/20/20)</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reg-NG_F">3. Regime Breakdown</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#vol-NG_F">4. Volume Filters</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#risk-NG_F">5. Risk Management</a></li>
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Tab 1: Robust Regions -->
+                    <div class="tab-pane fade show active" id="sens-NG_F">
+                        <h5>Top Robust Parameter Plateaus (Sensitivity Grid)</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>EMA Pair</th><th>CAGR</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Neighborhood Mean</th><th>Stability Score</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 2: Out of Sample -->
+                    <div class="tab-pane fade" id="oos-NG_F">
+                        <h5>Out-of-Sample Performance Degradation</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>In-Sample (60%)</h6>
+                                    <p>CAGR: <strong>+0.11%</strong> | Sharpe: <strong> 0.48</strong></p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>Out-of-Sample (20% Untouched)</h6>
+                                    <p>CAGR: <strong>-92.90%</strong> | Sharpe: <strong> 0.03</strong></p>
+                                    <small class="text-muted">Sharpe Degradation: -93.1%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Regime Breakdown -->
+                    <div class="tab-pane fade" id="reg-NG_F">
+                        <h5>Strategy Performance by Market Regime</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead><tr><th>Regime Type</th><th>State</th><th>Trades</th><th>Win Rate</th><th>Net P&L</th><th>Profit Factor</th></tr></thead>
+                            <tbody>
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bear Trend</strong></td>
+                    <td>4</td>
+                    <td> 25.0%</td>
+                    <td>$-26,410.00</td>
+                    <td> 0.05</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bull Trend</strong></td>
+                    <td>3</td>
+                    <td> 33.3%</td>
+                    <td>$-514.00</td>
+                    <td> 0.97</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Sideways / Chop</strong></td>
+                    <td>8</td>
+                    <td> 25.0%</td>
+                    <td>$-36,865.97</td>
+                    <td> 0.43</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Transitional</strong></td>
+                    <td>2</td>
+                    <td> 50.0%</td>
+                    <td>$-972.00</td>
+                    <td> 0.86</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>2</td>
+                    <td> 50.0%</td>
+                    <td>$-21,071.99</td>
+                    <td> 0.49</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>High Volatility</strong></td>
+                    <td>7</td>
+                    <td> 42.9%</td>
+                    <td>$+14,502.01</td>
+                    <td> 1.46</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Low Volatility</strong></td>
+                    <td>3</td>
+                    <td> 33.3%</td>
+                    <td>$-45,122.00</td>
+                    <td> 0.03</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Medium Volatility</strong></td>
+                    <td>8</td>
+                    <td> 12.5%</td>
+                    <td>$-75,181.98</td>
+                    <td> 0.08</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>1</td>
+                    <td>100.0%</td>
+                    <td>$+19,968.01</td>
+                    <td>99.00</td>
+                </tr>
+                </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 4: Volume Filters -->
+                    <div class="tab-pane fade" id="vol-NG_F">
+                        <h5>Volume Filter Comparison</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (No Filter)</td>
+                <td>-85.83%</td>
+                <td>93.75%</td>
+                <td>-0.01</td>
+                <td> 0.46</td>
+                <td> 31.6%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>2. Vol > 20-SMA Volume</td>
+                <td>-73.84%</td>
+                <td>91.27%</td>
+                <td> 0.14</td>
+                <td> 0.54</td>
+                <td> 35.7%</td>
+                <td>14</td>
+            </tr>
+            
+            <tr>
+                <td>3. RVOL > 1.2 Surge</td>
+                <td>-66.69%</td>
+                <td>88.88%</td>
+                <td> 0.21</td>
+                <td> 0.35</td>
+                <td> 42.9%</td>
+                <td>7</td>
+            </tr>
+            
+            <tr>
+                <td>4. RVOL > 1.5 Breakout</td>
+                <td>-53.71%</td>
+                <td>88.71%</td>
+                <td> 0.25</td>
+                <td> 0.41</td>
+                <td> 33.3%</td>
+                <td>3</td>
+            </tr>
+            
+            <tr>
+                <td>5. Price_Up + Vol_Up Confirmed</td>
+                <td> -1.96%</td>
+                <td>67.18%</td>
+                <td> 0.31</td>
+                <td> 0.98</td>
+                <td> 45.5%</td>
+                <td>11</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 5: Risk Overlays -->
+                    <div class="tab-pane fade" id="risk-NG_F">
+                        <h5>Risk Management Stop-Loss / Take-Profit Overlays</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (Opposite Cross)</td>
+                <td>-84.11%</td>
+                <td>92.74%</td>
+                <td>-0.02</td>
+                <td> 0.47</td>
+                <td> 31.6%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>2. Fixed SL (2.0%)</td>
+                <td>-87.37%</td>
+                <td>89.11%</td>
+                <td>-0.57</td>
+                <td> 0.02</td>
+                <td>  5.3%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>3. Fixed SL (3.5%)</td>
+                <td>-91.29%</td>
+                <td>93.03%</td>
+                <td>-0.47</td>
+                <td> 0.02</td>
+                <td>  5.3%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>4. ATR Stop (1.5x ATR)</td>
+                <td>-83.04%</td>
+                <td>88.86%</td>
+                <td>-0.10</td>
+                <td> 0.39</td>
+                <td> 26.3%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>5. ATR Stop (2.5x ATR)</td>
+                <td>-94.93%</td>
+                <td>97.26%</td>
+                <td> 0.10</td>
+                <td> 0.27</td>
+                <td> 26.3%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>6. Trailing Stop (2.0x ATR)</td>
+                <td> -6.24%</td>
+                <td>67.87%</td>
+                <td> 0.17</td>
+                <td> 0.96</td>
+                <td> 36.8%</td>
+                <td>19</td>
+            </tr>
+            
+            <tr>
+                <td>7. ATR SL + 1:2.5 TP Target</td>
+                <td>-11.90%</td>
+                <td>85.85%</td>
+                <td> 0.26</td>
+                <td> 0.94</td>
+                <td> 31.6%</td>
+                <td>19</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Statistical Assessment:</strong> Commodity exhibits prolonged non-directional mean-reversion causing severe negative drift.
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">📦 Brent Crude Oil Futures (BZ=F)</h4>
+                <span class="badge badge-info fs-6">ADD RISK-MANAGEMENT FILTER (Trailing ATR)</span>
+            </div>
+            <div class="card-body">
+                <!-- Audit Delta Cards -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Flawed Return (Lookahead)</div>
+                            <div class="metric-val text-muted">-69.59%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box highlight">
+                            <div class="metric-title">Corrected Real Return</div>
+                            <div class="metric-val">-68.92%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Max Drawdown</div>
+                            <div class="metric-val text-danger">86.90%</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-box">
+                            <div class="metric-title">Annualized Sharpe (Rf=4.5%)</div>
+                            <div class="metric-val">-0.16</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs for in-depth analysis -->
+                <ul class="nav nav-tabs" id="tab-BZ_F" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#sens-BZ_F">1. Parameter Plateaus</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#oos-BZ_F">2. Out-of-Sample (60/20/20)</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#reg-BZ_F">3. Regime Breakdown</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#vol-BZ_F">4. Volume Filters</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#risk-BZ_F">5. Risk Management</a></li>
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0 rounded-bottom">
+                    <!-- Tab 1: Robust Regions -->
+                    <div class="tab-pane fade show active" id="sens-BZ_F">
+                        <h5>Top Robust Parameter Plateaus (Sensitivity Grid)</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>EMA Pair</th><th>CAGR</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Neighborhood Mean</th><th>Stability Score</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 2: Out of Sample -->
+                    <div class="tab-pane fade" id="oos-BZ_F">
+                        <h5>Out-of-Sample Performance Degradation</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>In-Sample (60%)</h6>
+                                    <p>CAGR: <strong>-18.09%</strong> | Sharpe: <strong>-0.16</strong></p>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-light rounded">
+                                    <h6>Out-of-Sample (20% Untouched)</h6>
+                                    <p>CAGR: <strong>-75.44%</strong> | Sharpe: <strong> 0.24</strong></p>
+                                    <small class="text-muted">Sharpe Degradation: +247.0%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Regime Breakdown -->
+                    <div class="tab-pane fade" id="reg-BZ_F">
+                        <h5>Strategy Performance by Market Regime</h5>
+                        <table class="table table-sm table-bordered">
+                            <thead><tr><th>Regime Type</th><th>State</th><th>Trades</th><th>Win Rate</th><th>Net P&L</th><th>Profit Factor</th></tr></thead>
+                            <tbody>
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bear Trend</strong></td>
+                    <td>5</td>
+                    <td> 60.0%</td>
+                    <td>$-3,160.01</td>
+                    <td> 0.75</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Bull Trend</strong></td>
+                    <td>2</td>
+                    <td>  0.0%</td>
+                    <td>$-7,518.00</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Sideways / Chop</strong></td>
+                    <td>7</td>
+                    <td> 14.3%</td>
+                    <td>$-31,678.01</td>
+                    <td> 0.10</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Transitional</strong></td>
+                    <td>3</td>
+                    <td> 33.3%</td>
+                    <td>$+15,799.99</td>
+                    <td> 2.02</td>
+                </tr>
+                
+                <tr>
+                    <td>Trend Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>4</td>
+                    <td>  0.0%</td>
+                    <td>$-40,745.97</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>High Volatility</strong></td>
+                    <td>5</td>
+                    <td>  0.0%</td>
+                    <td>$-43,063.99</td>
+                    <td> 0.00</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Low Volatility</strong></td>
+                    <td>6</td>
+                    <td> 33.3%</td>
+                    <td>$-18,201.99</td>
+                    <td> 0.24</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Medium Volatility</strong></td>
+                    <td>9</td>
+                    <td> 33.3%</td>
+                    <td>$-300.04</td>
+                    <td> 0.99</td>
+                </tr>
+                
+                <tr>
+                    <td>Volatility Regime</td>
+                    <td><strong>Warmup</strong></td>
+                    <td>1</td>
+                    <td>  0.0%</td>
+                    <td>$-5,735.98</td>
+                    <td> 0.00</td>
+                </tr>
+                </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 4: Volume Filters -->
+                    <div class="tab-pane fade" id="vol-BZ_F">
+                        <h5>Volume Filter Comparison</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (No Filter)</td>
+                <td>-68.92%</td>
+                <td>86.90%</td>
+                <td>-0.16</td>
+                <td> 0.40</td>
+                <td> 23.8%</td>
+                <td>21</td>
+            </tr>
+            
+            <tr>
+                <td>2. Vol > 20-SMA Volume</td>
+                <td>+12.40%</td>
+                <td>50.28%</td>
+                <td> 0.32</td>
+                <td> 1.14</td>
+                <td> 22.2%</td>
+                <td>9</td>
+            </tr>
+            
+            <tr>
+                <td>3. RVOL > 1.2 Surge</td>
+                <td>+50.18%</td>
+                <td>48.19%</td>
+                <td> 0.46</td>
+                <td> 1.67</td>
+                <td> 25.0%</td>
+                <td>4</td>
+            </tr>
+            
+            <tr>
+                <td>4. RVOL > 1.5 Breakout</td>
+                <td> +0.00%</td>
+                <td> 0.00%</td>
+                <td> 0.00</td>
+                <td> 0.00</td>
+                <td>  0.0%</td>
+                <td>0</td>
+            </tr>
+            
+            <tr>
+                <td>5. Price_Up + Vol_Up Confirmed</td>
+                <td> +8.55%</td>
+                <td>57.13%</td>
+                <td> 0.29</td>
+                <td> 1.20</td>
+                <td> 25.0%</td>
+                <td>8</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Tab 5: Risk Overlays -->
+                    <div class="tab-pane fade" id="risk-BZ_F">
+                        <h5>Risk Management Stop-Loss / Take-Profit Overlays</h5>
+                        <table class="table table-sm table-striped">
+                            <thead><tr><th>Overlay</th><th>Total Return</th><th>Max Drawdown</th><th>Sharpe</th><th>Profit Factor</th><th>Win Rate</th><th>Trades</th></tr></thead>
+                            <tbody>
+            <tr>
+                <td>1. Baseline (Opposite Cross)</td>
+                <td>-69.47%</td>
+                <td>86.35%</td>
+                <td>-0.15</td>
+                <td> 0.39</td>
+                <td> 23.8%</td>
+                <td>21</td>
+            </tr>
+            
+            <tr>
+                <td>2. Fixed SL (2.0%)</td>
+                <td>-16.26%</td>
+                <td>70.27%</td>
+                <td> 0.21</td>
+                <td> 0.83</td>
+                <td> 18.2%</td>
+                <td>22</td>
+            </tr>
+            
+            <tr>
+                <td>3. Fixed SL (3.5%)</td>
+                <td>-33.11%</td>
+                <td>75.06%</td>
+                <td> 0.17</td>
+                <td> 0.71</td>
+                <td> 22.7%</td>
+                <td>22</td>
+            </tr>
+            
+            <tr>
+                <td>4. ATR Stop (1.5x ATR)</td>
+                <td>-70.22%</td>
+                <td>81.05%</td>
+                <td>-0.22</td>
+                <td> 0.40</td>
+                <td> 23.8%</td>
+                <td>21</td>
+            </tr>
+            
+            <tr>
+                <td>5. ATR Stop (2.5x ATR)</td>
+                <td>-68.37%</td>
+                <td>81.78%</td>
+                <td>-0.13</td>
+                <td> 0.41</td>
+                <td> 23.8%</td>
+                <td>21</td>
+            </tr>
+            
+            <tr>
+                <td>6. Trailing Stop (2.0x ATR)</td>
+                <td>+47.14%</td>
+                <td>46.64%</td>
+                <td> 0.42</td>
+                <td> 1.40</td>
+                <td> 40.9%</td>
+                <td>22</td>
+            </tr>
+            
+            <tr>
+                <td>7. ATR SL + 1:2.5 TP Target</td>
+                <td>-58.24%</td>
+                <td>69.79%</td>
+                <td>-0.09</td>
+                <td> 0.73</td>
+                <td> 28.6%</td>
+                <td>21</td>
+            </tr>
+            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <strong>Statistical Assessment:</strong> Trailing ATR stop protects against steep post-crossover drawdowns.
+                </div>
+            </div>
+        </div>
+        
+
+    <footer class="text-center text-muted py-4 border-top">
+        <p class="mb-0">OpenAlgo Quantitative Research Engine • Zero-Lookahead Verified • Research Only</p>
+    </footer>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

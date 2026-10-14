@@ -1,0 +1,14 @@
+{
+  "strategy_version_hash": "dc1063b1ccadd2e513c6d3f71a8a2f4f13465db852387204c0b27137249ed917",
+  "current_capital": 8900000.0,
+  "high_watermark": 10000000.0,
+  "current_drawdown_pct": 11.0,
+  "circuit_breaker_tripped": true,
+  "circuit_breaker_reason": "MAX_DRAWDOWN_LIMIT_BREACH_11.00%",
+  "executed_signals_count": 1,
+  "executed_signal_ids": [
+    "b7141009ca0c1cb386011200f2276e5c4f8b2b791a298c45ec655ced621266cb"
+  ],
+  "positions": {},
+  "last_updated": "2026-09-05T19:24:36.516568"
+}

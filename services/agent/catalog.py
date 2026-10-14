@@ -917,7 +917,7 @@ def _model_info(
         max_output_tokens=_as_int(fields.get("max_output_tokens")),
         input_price_per_million=_per_million(fields.get("input_cost_per_token")),
         output_price_per_million=_per_million(fields.get("output_cost_per_token")),
-        supports_function_calling=_as_bool(fields.get("supports_function_calling")),
+        supports_function_calling=True if provider == "chatgpt" and _as_bool(fields.get("supports_function_calling")) is None else _as_bool(fields.get("supports_function_calling")),
         supports_vision=_as_bool(fields.get("supports_vision")),
         supports_reasoning=_as_bool(fields.get("supports_reasoning")),
     )

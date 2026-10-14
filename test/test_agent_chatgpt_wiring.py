@@ -43,9 +43,8 @@ USER = "chatgpt-wiring-tests"
 #: that a bare name is *not* what identifies a plan turn.
 SUBSCRIPTION_ONLY = "gpt-5.3-instant"
 
-#: One of the eight that do share a bare name with an `openai` model. The
-#: `chatgpt/` prefix is the only thing separating the two billing systems.
-SHARED_NAME = "gpt-5.4"
+#: One of the models that share a bare name with an `openai` model and are supported on Codex.
+SHARED_NAME = "gpt-5.5"
 
 
 # ---------------------------------------------------------------------------
@@ -699,3 +698,23 @@ class TestTheRoutes:
         body = client.get("/agent/api/status").get_json()
 
         assert body["chatgpt_authorised"] is True
+
+
+class TestModelIdentifierNormalization:
+    """Ensure operator inputs like 'ChatGPT GPT-5.4' canonicalize and alias to supported Codex models."""
+
+    @pytest.mark.parametrize(
+        "raw_input,expected",
+        [
+            ("ChatGPT GPT-5.4", "chatgpt/gpt-5.5"),
+            ("chatgpt/gpt-5.4", "chatgpt/gpt-5.5"),
+            ("ChatGPT:gpt-5.4", "chatgpt/gpt-5.5"),
+            ("chatgpt GPT-5.5", "chatgpt/gpt-5.5"),
+            ("chatgpt/gpt-5.5", "chatgpt/gpt-5.5"),
+            ("ChatGPT/GPT-5.6-sol", "chatgpt/gpt-5.6-sol"),
+        ],
+    )
+    def test_chatgpt_model_identifier_normalization(self, raw_input, expected):
+        assert litellm_model_id("litellm", raw_input) == expected
+        assert chatgpt_oauth.is_subscription_model(raw_input) is True
+

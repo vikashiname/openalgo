@@ -1,0 +1,13 @@
+{
+  "n_simulations": 5000,
+  "long_mean_alpha": 87.40615958095971,
+  "long_median_alpha": 86.86417120927538,
+  "long_p5_alpha": 53.18070760655844,
+  "long_p95_alpha": 123.94270106542292,
+  "long_prob_positive": 100.0,
+  "short_mean_alpha": 141.43558654287057,
+  "short_median_alpha": 141.20769204579744,
+  "short_p5_alpha": 100.19767438061747,
+  "short_p95_alpha": 184.5332823995601,
+  "short_prob_positive": 100.0
+}

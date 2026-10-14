@@ -2465,6 +2465,133 @@ class TelegramBotService:
             await query.edit_message_text("Action cancelled.")
             return
 
+        # 1-Click Trade: Covered Call Entry
+        if callback_data == "trade_coveredcall_enter":
+            telegram_user = get_telegram_user(user.id)
+            if not telegram_user:
+                await query.edit_message_text("Please link your account first using /link")
+                return
+
+            client = self._get_sdk_client(user.id)
+            if not client:
+                await query.edit_message_text("Failed to connect to OpenAlgo")
+                return
+
+            await query.edit_message_text("⏳ Executing 1-Click Covered Call Entry...")
+
+            try:
+                loop = asyncio.get_event_loop()
+                # 1. Place Futures Buy Order
+                fut_res = await loop.run_in_executor(
+                    None,
+                    lambda: client.placeorder(
+                        strategy="NIFTY_COVERED_CALL",
+                        symbol="NIFTY27OCT26FUT",
+                        exchange="NFO",
+                        action="BUY",
+                        quantity=65,
+                        price_type="MARKET",
+                        product="NRML",
+                    ),
+                )
+                # 2. Place Short Call Sell Order
+                call_res = await loop.run_in_executor(
+                    None,
+                    lambda: client.placeorder(
+                        strategy="NIFTY_COVERED_CALL",
+                        symbol="NIFTY27OCT2622850CE",
+                        exchange="NFO",
+                        action="SELL",
+                        quantity=65,
+                        price_type="MARKET",
+                        product="NRML",
+                    ),
+                )
+
+                fut_ok = fut_res and fut_res.get("status") == "success"
+                call_ok = call_res and call_res.get("status") == "success"
+
+                if fut_ok and call_ok:
+                    msg = (
+                        "🟢 *1-CLICK COVERED CALL ENTERED!*\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "• *Long Futures:* BUY 65x `NIFTY27OCT26FUT`\n"
+                        "• *Short Call:* SELL 65x `NIFTY27OCT2622850CE` (Δ ~0.30)\n"
+                        "• *Order Status:* Complete\n\n"
+                        "Use /positions to view live P&L."
+                    )
+                else:
+                    msg = (
+                        "⚠ *Partial or Failed Execution*\n"
+                        f"• Futures: {fut_res.get('message', 'OK')}\n"
+                        f"• Call: {call_res.get('message', 'OK')}"
+                    )
+
+                await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                logger.exception(f"Error in 1-click covered call entry: {e}")
+                await context.bot.send_message(chat_id=chat_id, text="Error executing 1-click trade.")
+            log_command(user.id, "trade_coveredcall_enter", chat_id)
+            return
+
+        # 1-Click Trade: Covered Call Square-Off
+        if callback_data == "trade_coveredcall_exit":
+            telegram_user = get_telegram_user(user.id)
+            if not telegram_user:
+                await query.edit_message_text("Please link your account first using /link")
+                return
+
+            client = self._get_sdk_client(user.id)
+            if not client:
+                await query.edit_message_text("Failed to connect to OpenAlgo")
+                return
+
+            await query.edit_message_text("⏳ Squaring off Covered Call positions...")
+
+            try:
+                loop = asyncio.get_event_loop()
+                # 1. Close Futures (Sell)
+                fut_res = await loop.run_in_executor(
+                    None,
+                    lambda: client.placeorder(
+                        strategy="NIFTY_COVERED_CALL",
+                        symbol="NIFTY27OCT26FUT",
+                        exchange="NFO",
+                        action="SELL",
+                        quantity=65,
+                        price_type="MARKET",
+                        product="NRML",
+                    ),
+                )
+                # 2. Buy back Call (Buy)
+                call_res = await loop.run_in_executor(
+                    None,
+                    lambda: client.placeorder(
+                        strategy="NIFTY_COVERED_CALL",
+                        symbol="NIFTY27OCT2622850CE",
+                        exchange="NFO",
+                        action="BUY",
+                        quantity=65,
+                        price_type="MARKET",
+                        product="NRML",
+                    ),
+                )
+
+                msg = (
+                    "🏁 *COVERED CALL SQUARED OFF!*\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "• *Futures Position:* Closed (SOLD 65x)\n"
+                    "• *Call Option:* Bought to cover (BOUGHT 65x)\n\n"
+                    "Use /positions to verify 0 open quantity."
+                )
+                await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                logger.exception(f"Error in 1-click covered call exit: {e}")
+                await context.bot.send_message(chat_id=chat_id, text="Error squaring off covered call.")
+            log_command(user.id, "trade_coveredcall_exit", chat_id)
+            return
+
+
         # Handle close all positions confirmation
         if callback_data == "confirm_closeall":
             telegram_user = get_telegram_user(user.id)

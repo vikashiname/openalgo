@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "skills": {
+    "backtest": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "13f76c5ab7968c459b1714aef058f69a4271d8067e580f7902f356c2db8f5ccf"
+    },
+    "custom-indicator": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "055117c80f715df8ba6d4ae6e4b7a849562d87797d2589373786b79d59f6f322"
+    },
+    "indicator-chart": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "b163190657772ae50c5737e70a08fbfafa767152a7957fd0e51f23ab48453036"
+    },
+    "indicator-dashboard": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "56e1977065f646bc2737f2687b1aec2b652d3548250fabc7ff280bc4d58d1401"
+    },
+    "indicator-expert": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "0c485abc06b0423ba72612c98cba86e7de9d25f330bf6309723a9b421f53ce20"
+    },
+    "indicator-scanner": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "e28aaf7db337296bed345c76ed795b64a46c51bb3cda6e3d316369ef69a6fda7"
+    },
+    "indicator-setup": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "a5c3cfbd6838d0df2ea3d54dd8a68d82abd55966d89a69d191ad528045a3356d"
+    },
+    "live-feed": {
+      "source": "marketcalls/openalgo-indicator-skills",
+      "sourceType": "github",
+      "computedHash": "ee0a1de3cf64a2829903d8d991401c23dcdd064589612e83effcd397bc544a93"
+    },
+    "optimize": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "7d7a381e36a2af4a07f6f4a2892bc66ab9eb157686eabad6a247fe52c98fb8f4"
+    },
+    "quick-stats": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "87750b23b07530c719e7276470596222d8c902387e508f925921ae8752a33655"
+    },
+    "setup": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "90b6da47fbea05fe95e9fef0f7c637a6e3f71d92f0bb4d180f63b35ba5a29eb0"
+    },
+    "strategy-compare": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "e7cdea7e217eca5b330d237cccd79eab9e1a14c2f561dea03c056444d2b6829b"
+    },
+    "vectorbt-expert": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "computedHash": "926c3c569015d41b69590d095d338f5b042036a4a4ffef96aac32e3ff079363b"
+    }
+  }
+}

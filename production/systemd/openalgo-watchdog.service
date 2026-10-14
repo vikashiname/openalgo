@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenAlgo Independent Strategy Health & Heartbeat Watchdog
+After=network.target openalgo.service
+Wants=openalgo.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fyersawsog
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/fyersawsog/.venv/bin/python strategies/liveonopenalgo/watchdog.py
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

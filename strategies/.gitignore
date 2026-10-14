@@ -40,12 +40,14 @@ indicators/*.js
 
 # Ignore any backup files
 *.bak
+*.bak*
 *.backup
 *.backup_*
 *~
 
 # Live strategy runtime state, heartbeats, and local logs
 liveonopenalgo/*_state.json
+liveonopenalgo/*_heartbeat.json
 liveonopenalgo/heartbeat.json
 liveonopenalgo/*.log
 liveonopenalgo/*.csv

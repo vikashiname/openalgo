@@ -1,0 +1,27 @@
+{
+  "bootstrap_iterations": 5000,
+  "prob_outperforming_control_pct": 100.0,
+  "prob_positive_net_return_pct": 74.06,
+  "cand_return_mean_pct": 82.14,
+  "cand_return_ci_95_pct": [
+    -162.79,
+    325.41
+  ],
+  "cand_return_ci_99_pct": [
+    -233.73,
+    409.3
+  ],
+  "cand_pf_mean": 1.039,
+  "cand_pf_ci_95": [
+    0.93,
+    1.16
+  ],
+  "cand_mdd_median_pct": 114.66,
+  "cand_mdd_95th_percentile_pct": 227.38,
+  "cand_mdd_99th_percentile_pct": 293.56,
+  "alpha_mean_pct": 87.33,
+  "alpha_ci_95_pct": [
+    46.52,
+    130.89
+  ]
+}

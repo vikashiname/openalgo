@@ -358,6 +358,7 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
     def test_case_8_target_hit(self):
         """Case 8: Target Hit Exit Alert"""
         engine = EMACrossPaperTradingEngine(symbols=["NTPC"])
+        engine.enable_trailing_runner = False
         engine.state_manager.state = engine.state_manager._default_state()
         engine.state_manager.state["tracked_positions"]["NTPC27OCT26FUT"] = {
             "contract": "NTPC27OCT26FUT",

@@ -1,0 +1,29 @@
+{
+  "run_id": "run_20261012_audit_opt",
+  "created_at": "2026-10-12T19:25:00+05:30",
+  "status": "COMPLETED",
+  "input_files": {
+    "live_emacrossopen": {
+      "path": "strategies/liveonopenalgo/emacrossopen.py",
+      "sha256": "aaaaeed343929ff382465759be6bd1169a297148575209849f2c96165931a8ab"
+    },
+    "live_macdfno": {
+      "path": "strategies/liveonopenalgo/macdfno.py",
+      "sha256": "39403492b69e5bb7dd683b07a021ddb6b896436f21b77025fb4537a2cafc2414"
+    },
+    "backtest_emacrossopen": {
+      "path": "backtesting/emacrossopen/emacrossopen.py",
+      "sha256": "3a623c634d52a15dcb396f07641369787cc9b3d3238fbfb229718a2515d78519"
+    },
+    "datasets_count": 0,
+    "datasets_path": "backtesting/data/*_1H.parquet"
+  },
+  "generated_artifacts": {
+    "BASELINE_AUDIT.md": "e1558e42c72d3d2c494834a3e57e219f1f2b3d643546c149244401845302ea71",
+    "ACCOUNTING_AUDIT.md": "673e904c98ade0209c0771000fa41ada0c82517e1dcd0ff59f47c8979ea1a7aa",
+    "EXPERIMENT_MATRIX.csv": "cd0324ab8f4258c83c8306044dba8e48ab377aec56150a1ee5b28496ab746b99",
+    "ROBUSTNESS_REPORT.md": "7a363f76e8586f89985a30e9607f41cd031b2b5d3df968afa0908c09164f4f0b",
+    "TEST_RESULTS.md": "f72b7c57aa5f207f579b07d34277d53971c80cd8b2723c541ade1b327b592a81",
+    "PAPER_SIMULATION_PLAN.md": "a228e00fc6e1697e50f82992a1b13cad4e2c3b03c6b1fa2a50e22d8193d37d12"
+  }
+}
