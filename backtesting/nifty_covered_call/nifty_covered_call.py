@@ -151,6 +151,8 @@ class NiftyCoveredCallEngine:
         delta: float = 0.30,
         target_pct: float = 0.90,
         stoploss_mult: float = 3.0,
+        fut_stoploss_pct: float = 0.02,
+        max_drawdown_inr: float = 20000.0,
         target_dte: int = 28,
         roll_dte: int = 10,
         lots: int = 1,
@@ -163,6 +165,8 @@ class NiftyCoveredCallEngine:
         self.target_delta = delta
         self.target_pct = target_pct
         self.stoploss_mult = stoploss_mult
+        self.fut_stoploss_pct = fut_stoploss_pct
+        self.max_drawdown_inr = max_drawdown_inr
         self.target_dte = target_dte
         self.roll_dte = roll_dte
         self.lots = lots
@@ -253,12 +257,26 @@ class NiftyCoveredCallEngine:
         try:
             res = self.client.search(query="NIFTY", exchange="NFO")
             if isinstance(res, dict) and res.get("status") == "success":
+                def _is_nifty50_symbol(sym: str) -> bool:
+                    s = sym.upper().replace(" ", "").replace("-", "").replace("_", "")
+                    if not s.startswith("NIFTY"):
+                        return False
+                    excluded = [
+                        "BANK", "FIN", "MID", "NXT", "IT", "AUTO",
+                        "METAL", "PHARMA", "MEDIA", "COMMODITIES",
+                        "ENERGY", "INFRA", "PSE", "CPSE", "FPI", "100", "200", "500"
+                    ]
+                    if any(exc in s for exc in excluded):
+                        return False
+                    rest = s[5:]
+                    if not rest:
+                        return False
+                    return rest[0].isdigit()
+
                 futs = [
                     x for x in res.get("data", [])
                     if x.get("instrumenttype") in ["FUTIDX", "futures", "FUT"]
-                    and x.get("symbol", "").startswith("NIFTY")
-                    and not any(x.get("symbol", "").startswith(p) for p in ["BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"])
-                    and "FPI" not in x.get("symbol", "")
+                    and _is_nifty50_symbol(x.get("symbol", ""))
                 ]
                 if futs:
                     # Pick closest expiry future using proper datetime sorting
@@ -291,7 +309,15 @@ class NiftyCoveredCallEngine:
         try:
             today_str = get_current_ist().strftime("%Y-%m-%d")
             start_str = (get_current_ist() - timedelta(days=200)).strftime("%Y-%m-%d")
-            hist = self.client.history(symbol="NIFTY 50", exchange="NSE", interval="D", start_date=start_str, end_date=today_str)
+            hist = None
+            for sym, exch in [("NIFTY 50", "NSE"), ("NIFTY", "NSE"), ("NIFTY 50", "NSE_INDEX")]:
+                try:
+                    res = self.client.history(symbol=sym, exchange=exch, interval="D", start_date=start_str, end_date=today_str)
+                    if res and isinstance(res, list) and len(res) >= 50:
+                        hist = res
+                        break
+                except Exception:
+                    continue
             if hist and isinstance(hist, list) and len(hist) >= 50:
                 closes = [float(c.get("close", 0)) for c in hist if "close" in c]
                 ema_100 = pd.Series(closes).ewm(span=100, adjust=False).mean().iloc[-1]
@@ -550,14 +576,41 @@ class NiftyCoveredCallEngine:
         now = get_current_ist()
         self.state["last_scan_ist"] = now.strftime("%Y-%m-%d %H:%M:%S IST")
 
-        # 1. Fetch live futures quote
-        fut_info = self.get_near_futures_contract()
-        spot = fut_info["ltp"]
-        if spot <= 0:
-            logger.warning("[!] Invalid spot/futures price received. Skipping cycle.")
-            return
-
         pos = self.state.get("active_position")
+
+        # 1. Fetch live futures quote
+        if pos:
+            # Directly quote the held futures symbol to prevent redundant search API calls & symbol mixups
+            fut_symbol = pos.get("fut_symbol", "NIFTY27OCT26FUT")
+            spot = 0.0
+            if self.client:
+                q = self.client.quotes(exchange="NFO", symbol=fut_symbol)
+                if isinstance(q, dict) and q.get("status") == "success":
+                    spot = float(q.get("data", {}).get("ltp", 0.0) or 0.0)
+
+            # Fallback to get_near_futures_contract if quote failed
+            if spot <= 0:
+                fut_info = self.get_near_futures_contract()
+                spot = float(fut_info.get("ltp", 0.0) or 0.0)
+
+            if spot <= 0:
+                logger.warning(f"[!] Invalid futures price received for {fut_symbol}. Skipping cycle.")
+                return
+
+            # Sanity Guard: protect against abnormal price spikes (>20% from entry price)
+            entry_p = float(pos.get("fut_entry_price", 0.0))
+            if entry_p > 0 and abs(spot - entry_p) / entry_p > 0.20:
+                logger.warning(
+                    f"[!] Extreme price spike detected on futures: ₹{spot:,.2f} vs entry ₹{entry_p:,.2f} "
+                    f"({abs(spot - entry_p)/entry_p*100:.1f}% deviation). Rejecting tick to protect position."
+                )
+                return
+        else:
+            fut_info = self.get_near_futures_contract()
+            spot = float(fut_info.get("ltp", 0.0) or 0.0)
+            if spot <= 0:
+                logger.warning("[!] Invalid spot/futures price received. Skipping cycle.")
+                return
 
         # 2. Morning Briefing Alert (dispatched once per day between 09:15 and 09:30 IST)
         today_date_str = now.strftime("%Y-%m-%d")
@@ -610,17 +663,38 @@ class NiftyCoveredCallEngine:
                 f"M2M: ₹{net_m2m:+,.2f} | DTE: {dte_left}d"
             )
 
-            # Exit Condition 1: Profit Target (90% decay)
+            fut_return_pct = (spot - pos["fut_entry_price"]) / pos["fut_entry_price"]
+
+            # Exit Condition 1: Futures Catastrophe Stop-Loss
+            if fut_return_pct <= -self.fut_stoploss_pct:
+                self.execute_exit(
+                    f"FUTURES_STOP_LOSS_HIT ({fut_return_pct*100:.2f}% <= -{self.fut_stoploss_pct*100:.1f}%)",
+                    spot,
+                    curr_call_price
+                )
+                return
+
+            # Exit Condition 2: Absolute Strategy Net Drawdown Cap
+            if net_m2m <= -self.max_drawdown_inr:
+                self.execute_exit(
+                    f"MAX_NET_DRAWDOWN_BREACHED (M2M: ₹{net_m2m:,.2f} <= -₹{self.max_drawdown_inr:,.2f})",
+                    spot,
+                    curr_call_price
+                )
+                return
+
+            # Exit Condition 3: Call Profit Target (with negative M2M crash protection guard)
             if curr_call_price <= pos["target_price"]:
-                self.execute_exit("PROFIT_TARGET_HIT (90% Decay)", spot, curr_call_price)
+                reason = "PROFIT_TARGET_HIT (90% Decay)" if net_m2m > 0 else "BEARISH_DECAY_CLOSE (Net Negative M2M)"
+                self.execute_exit(reason, spot, curr_call_price)
                 return
 
-            # Exit Condition 2: Stop Loss (3.0x initial premium)
+            # Exit Condition 4: Call Stop Loss (3.0x initial premium)
             if curr_call_price >= pos["stoploss_price"]:
-                self.execute_exit("STOP_LOSS_HIT (3.0x Premium)", spot, curr_call_price)
+                self.execute_exit("CALL_STOP_LOSS_HIT (3.0x Premium)", spot, curr_call_price)
                 return
 
-            # Exit Condition 3: Roll Threshold (DTE <= roll_dte)
+            # Exit Condition 5: Roll Threshold (DTE <= roll_dte)
             if dte_left <= self.roll_dte:
                 self.execute_exit(f"ROLL_THRESHOLD_REACHED (DTE <= {self.roll_dte})", spot, curr_call_price)
                 return
@@ -689,6 +763,8 @@ def parse_cli():
     parser.add_argument("--delta", type=float, default=0.30, help="Target short call delta (default: 0.30)")
     parser.add_argument("--target", type=float, default=0.90, help="Profit target pct (default: 0.90 = 90%% decay)")
     parser.add_argument("--stoploss", type=float, default=3.0, help="Stop loss multiplier (default: 3.0 = 3x)")
+    parser.add_argument("--fut-stoploss", type=float, default=0.02, help="Futures stop loss pct (default: 0.02 = 2.0%%)")
+    parser.add_argument("--max-drawdown", type=float, default=20000.0, help="Max net M2M drawdown in INR per lot (default: 20000.0)")
     parser.add_argument("--roll-dte", type=int, default=10, help="Roll DTE threshold (default: 10)")
     parser.add_argument("--target-dte", type=int, default=28, help="Target initial DTE (default: 28)")
     parser.add_argument("--lots", type=int, default=1, help="Number of lots (default: 1)")
@@ -705,6 +781,8 @@ if __name__ == "__main__":
         delta=args.delta,
         target_pct=args.target,
         stoploss_mult=args.stoploss,
+        fut_stoploss_pct=args.fut_stoploss,
+        max_drawdown_inr=args.max_drawdown,
         target_dte=args.target_dte,
         roll_dte=args.roll_dte,
         lots=args.lots,
