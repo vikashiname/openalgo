@@ -92,6 +92,7 @@ DEFAULT_PROFIT_TARGET_COST_BUFFER = 1000.0
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_STATE_FILE = Path(os.getenv("STATE_FILE", SCRIPT_DIR / "nifty_covered_call_state.json"))
+DEFAULT_HEARTBEAT_FILE = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "nifty_covered_call_heartbeat.json"))
 
 logger = logging.getLogger("NiftyCoveredCallValidated")
 
@@ -215,6 +216,7 @@ class NiftyCoveredCallValidatedEngine:
         self.harvest_decay_pct = harvest_decay_pct
         self.roll_min_dte = roll_min_dte
         self.state_file = Path(state_file) if state_file else DEFAULT_STATE_FILE
+        self.heartbeat_file = Path(os.getenv("HEARTBEAT_FILE", DEFAULT_HEARTBEAT_FILE))
         self.client = client
         if self.client is None and OPENALGO_AVAILABLE and self.api_key:
             try:
@@ -256,7 +258,7 @@ class NiftyCoveredCallValidatedEngine:
         if not self.state_file:
             return False
         try:
-            tmp = self.state_file.with_suffix(".tmp")
+            tmp = self.state_file.with_suffix(f".tmp.{os.getpid()}")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.state, f, indent=2, default=str)
             os.replace(tmp, self.state_file)
@@ -264,6 +266,25 @@ class NiftyCoveredCallValidatedEngine:
         except Exception as e:
             logger.error(f"[!] Failed to persist state: {e}")
             return False
+
+    def emit_heartbeat(self, status: str = "HEALTHY"):
+        """Emit JSON heartbeat file for independent watchdog monitoring."""
+        if not self.heartbeat_file:
+            return
+        try:
+            hb_data = {
+                "strategy": "NIFTY_COVERED_CALL",
+                "timestamp": datetime.now(IST).isoformat(),
+                "status": status,
+                "mode": self.mode,
+                "active_position": self.state.get("active_position") is not None,
+            }
+            tmp = self.heartbeat_file.with_suffix(f".tmp.{os.getpid()}")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(hb_data, f, indent=2)
+            os.replace(tmp, self.heartbeat_file)
+        except Exception as e:
+            logger.error(f"[!] Failed to emit heartbeat: {e}")
 
     # --------------------------------------------------------------------------
     # FIX 1: Startup & Pre-Entry Broker Reconciliation (Fail-Closed)
@@ -1494,6 +1515,7 @@ class NiftyCoveredCallValidatedEngine:
         """Single assessment cycle with continuous closed-loop broker reconciliation."""
         now = get_current_ist()
         self.state["last_scan_ist"] = now.strftime("%Y-%m-%d %H:%M:%S IST")
+        self.emit_heartbeat(status="HEALTHY")
 
         # -------------------------------------------------------------
         # Continuous Closed-Loop Reconciliation (Startup and every cycle)

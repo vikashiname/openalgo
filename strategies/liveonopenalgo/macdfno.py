@@ -3,13 +3,14 @@
 OPENALGO LIVE STRATEGY: MULTI-ASSET NFO MACD CROSSOVER & REGIME ENGINE
 ================================================================================
 File Role            : LIVE_OPENALGO
-Strategy Identifier  : MACD_FNO_V2 (Candidate E / 0.35% Runner Architecture)
-Current Version      : 2.0.0
-Last Modified        : 2026-10-12
+Strategy Identifier  : MACD_FNO_V1_C3 (v1.3.1)
+Current Version      : 1.3.1-C3
+Last Modified        : 2026-10-15
 Git Baseline Commit  : 209361f37ab8ae7e8f9de8f16ce37421f616c11f
 Production Approval  : SHADOW / PAPER TRADING ONLY (Phase 7 Governance)
 
 Implementation History:
+  - 2026-10-15 [v1.3.1-C3]: Promoted Variant C3 time-filter realignment (09:45-13:15 IST morning+midday window permitting 11:15 IST evaluation; 14:00-14:59 IST dead zone preserved).
   - 2026-10-12 [v1.3.0]: Official Baseline Candidate G (Pure MACD Cross + Asymmetric Universe: TOP_LONGS / TOP_SHORTS) with optional Candidate E runner mode.
   - 2026-10-12 [v1.2.1]: Added --auto-exit-misaligned option, DB lock retry backoff, and order pacing.
   - 2026-10-10 [v1.2.0]: Alert deduplication against OpenAlgo subscriber and transition matrix tests.
@@ -21,7 +22,7 @@ Current Strategy Specification:
      - MACD: 12 / 26 / 9 with 2-bar histogram expansion confirmation.
   2. Execution Gates & Universe:
      - Universe Selection: Asymmetric Alpha Whitelist (TOP_LONGS: 7, TOP_SHORTS: 6).
-     - Time Filter: Dead zones 11:00-11:59 and 14:00-14:59 IST blocked; gaps 09:15-09:44 blocked.
+     - Time Filter: Variant C3 realignment (09:45-13:15 IST allowed unblocking 11:15 IST; dead zone 14:00-14:59 IST blocked; gaps 09:15-09:44 blocked).
      - Long Regime Guard: Close must be above 50-EMA (and 100-EMA for weak sectors).
   3. Risk Management & Exits:
      - Baseline (Candidate G): Pure MACD opposite signal reversal. No fixed artificial profit targets.
@@ -541,8 +542,7 @@ TOP_LONGS = {
     "BAJFINANCE", "NTPC"
 }
 TOP_SHORTS = {
-    "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC",
-    "NIFTY"
+    "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC"
 }
 USE_ASYMMETRIC_UNIVERSE = os.getenv("USE_ASYMMETRIC_UNIVERSE", "true").lower() in ["true", "1", "yes"]
 
@@ -571,28 +571,22 @@ WEAK_LONG_SYMBOLS = {
 
 def is_entry_time_allowed(now_dt: Optional[datetime] = None) -> Tuple[bool, str]:
     """
-    Empirical time-of-day execution filter for Indian F&O.
+    Empirical time-of-day execution filter for Indian F&O (Variant C3 Realignment).
     Blocks fresh entries during known low-volume chop and European open whipsaw windows:
-      - Dead Zone 1: 11:00 - 11:59 IST (Pre-EU chop / volume vacuum: -Rs. 3.04L drain)
-      - Dead Zone 2: 14:00 - 14:59 IST (EU open whipsaws: -Rs. 2.11L drain)
+      - Dead Zone: 14:00 - 14:59 IST (EU open whipsaws: -Rs. 2.11L drain)
       - Opening 30 min: 09:15 - 09:44 IST (Gap noise / unconfirmed momentum)
     Permits fresh entries during:
-      - Morning Window:  09:45 - 10:55 IST (+Rs. 4.85L)
-      - Midday Window:   12:00 - 13:15 IST (+Rs. 1.99L, 66.7% win rate)
-      - Closing Surge:   15:00 - 15:20 IST (+Rs. 3.42L)
+      - Morning & Midday Window: 09:45 - 13:15 IST (unblocks 11:15 IST morning continuation)
+      - Closing Surge:           15:00 - 15:20 IST (+Rs. 3.42L)
     """
     if not ENABLE_TIME_FILTER:
         return True, "FILTER_DISABLED"
     now = (now_dt or datetime.now(IST)).time()
     m = now.hour * 60 + now.minute
-    if (9 * 60 + 45) <= m <= (10 * 60 + 55):
-        return True, "MORNING_WINDOW"
-    elif (12 * 60 + 0) <= m <= (13 * 60 + 15):
-        return True, "MIDDAY_WINDOW"
+    if (9 * 60 + 45) <= m <= (13 * 60 + 15):
+        return True, "MORNING_AND_MIDDAY_WINDOW"
     elif (15 * 60 + 0) <= m <= (15 * 60 + 20):
         return True, "CLOSING_WINDOW"
-    elif (11 * 60) <= m < (12 * 60):
-        return False, "DEAD_ZONE_11_AM"
     elif (14 * 60) <= m < (15 * 60):
         return False, "DEAD_ZONE_14_PM"
     else:
@@ -1296,6 +1290,14 @@ class NFOPortfolioLiveTrader:
                     )
                     send_telegram_alert(alert_msg)
 
+        # Closed-Loop External Manual Exit Detection (Detect UI Square-Offs)
+        for contract_sym, pos_data in local_tracked.items():
+            if contract_sym not in tracked_map:
+                logger.warning(
+                    f"🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for {contract_sym} is FLAT on broker. "
+                    f"Local strategy state reconciled to FLAT (Reason: MANUAL_UI_EXIT)."
+                )
+
         self.state_manager.update_tracked_positions(tracked_map)
         self.state_manager.record_reconciliation_audit({
             "total_open_positions": len(reconciled_positions),
@@ -1514,14 +1516,26 @@ class NFOPortfolioLiveTrader:
     def get_open_position(self, contract_symbol: str) -> int:
         """Retrieves net position quantity from OpenAlgo for the contract."""
         try:
-            pos = self.client.openposition(
-                strategy=STRATEGY_NAME,
-                symbol=contract_symbol,
-                exchange=EXCHANGE,
-                product=PRODUCT,
+            if self.client is not None:
+                pos = self.client.openposition(
+                    strategy=STRATEGY_NAME,
+                    symbol=contract_symbol,
+                    exchange=EXCHANGE,
+                    product=PRODUCT,
+                )
+                if isinstance(pos, dict) and pos.get("quantity") is not None:
+                    return int(pos["quantity"])
+
+            resp = requests.post(
+                f"{self.host.rstrip('/')}/api/v1/positionbook",
+                json={"apikey": self.api_key},
+                timeout=6,
             )
-            if isinstance(pos, dict) and pos.get("quantity") is not None:
-                return int(pos["quantity"])
+            if resp.status_code == 200:
+                positions = resp.json().get("data", [])
+                for p in positions:
+                    if p.get("symbol") == contract_symbol:
+                        return int(p.get("quantity", 0))
         except Exception as e:
             logger.warning(f"Position query warning for {contract_symbol}: {e}")
         
@@ -1530,6 +1544,27 @@ class NFOPortfolioLiveTrader:
             return int(tracked.get("quantity", 0))
 
         return 0
+
+    def get_all_open_positions(self) -> Dict[str, int]:
+        """Queries OpenAlgo positionbook and returns map of {contract_symbol: quantity} for all open positions."""
+        open_positions = {}
+        try:
+            resp = requests.post(
+                f"{self.host.rstrip('/')}/api/v1/positionbook",
+                json={"apikey": self.api_key},
+                timeout=6,
+            )
+            if resp.status_code == 200:
+                positions = resp.json().get("data", [])
+                for p in positions:
+                    sym = p.get("symbol", "")
+                    qty = int(p.get("quantity", 0))
+                    if qty != 0 and sym:
+                        open_positions[sym] = qty
+        except Exception as e:
+            logger.warning(f"Failed to query all open positions: {e}")
+
+        return open_positions
 
     def _fetch_and_eval_symbol(self, sym: str) -> Dict[str, Any]:
         """
@@ -2034,6 +2069,19 @@ class NFOPortfolioLiveTrader:
 
         if exit_action and exit_qty > 0:
             logger.info(f"🎯 [RISK EXIT TRIGGERED] {symbol} ({contract_sym}): {exit_reason} | Pos: {pos_qty} | Entry: ₹{entry_price:.2f} | Close: ₹{last_close:.2f} | Action: {exit_action} {exit_qty}")
+
+            # Closed-Loop Reverse-Order Guard: verify broker holds open position before sending exit order
+            actual_broker_qty = self.get_open_position(contract_sym)
+            if actual_broker_qty == 0:
+                logger.warning(
+                    f"🛑 [REVERSE ORDER PREVENTED] {symbol} ({contract_sym}): Position is already FLAT (0) on broker! "
+                    f"Aborting {exit_action} exit order to prevent unintended reverse position. Synchronizing local state to FLAT."
+                )
+                all_tracked = self.state_manager.state.get("tracked_positions", {})
+                all_tracked.pop(contract_sym, None)
+                self.state_manager.update_tracked_positions(all_tracked)
+                return True
+
             candle_time = df.index[-1] if hasattr(df.index[-1], "isoformat") else str(df.index[-1])
             resp = self.place_order(symbol, contract_sym, action=exit_action, quantity=exit_qty, candle_time=candle_time)
             if resp:
@@ -2063,6 +2111,22 @@ class NFOPortfolioLiveTrader:
         """Single portfolio scan cycle across all target NFO symbols."""
         cycle_t0 = time.perf_counter()
         self.refresh_contracts()
+
+        # In-Loop Closed-Loop Reconciliation: Synchronize tracked positions with broker positionbook
+        open_positions = self.get_all_open_positions()
+        local_tracked = self.state_manager.state.get("tracked_positions", {})
+        cleaned_tracked = {}
+        for c_sym, p_data in local_tracked.items():
+            if c_sym in open_positions:
+                cleaned_tracked[c_sym] = p_data
+            else:
+                logger.warning(
+                    f"🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for {c_sym} is FLAT on broker. "
+                    f"Local strategy state reconciled to FLAT (Reason: MANUAL_UI_EXIT)."
+                )
+        if len(cleaned_tracked) != len(local_tracked):
+            self.state_manager.update_tracked_positions(cleaned_tracked)
+
         logger.info(f"🔍 Starting NFO Portfolio scan across {len(self.symbols)} instruments...")
 
         active_positions = {}
@@ -2203,6 +2267,13 @@ class NFOPortfolioLiveTrader:
                     if time_ok and regime_ok and universe_ok:
                         logger.info(f"🔄 [REVERSE SHORT->LONG] Reversing short position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
                         reverse_qty = abs(pos) + order_qty
+                        actual_broker_qty = self.get_open_position(contract_sym)
+                        if actual_broker_qty == 0:
+                            logger.info(
+                                f"ℹ️ [REVERSAL ADJUSTMENT] {sym} ({contract_sym}): Prior position is already flat on broker. "
+                                f"Adjusting order quantity from {reverse_qty} to base entry size {order_qty}."
+                            )
+                            reverse_qty = order_qty
                         resp = self.place_order(sym, contract_sym, action="BUY", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
                             self.last_processed_candle[sym] = str(candle_time)
@@ -2242,6 +2313,19 @@ class NFOPortfolioLiveTrader:
                             # 3. New LONG trade alert
                             self.dispatch_trade_alert(sym, contract_sym, "BUY", "LONG", pos, order_qty, candle_time, trigger_price, resp, c)
                     else:
+                        actual_broker_qty = self.get_open_position(contract_sym)
+                        if actual_broker_qty == 0:
+                            logger.warning(
+                                f"🛑 [REVERSE ORDER PREVENTED] {sym} ({contract_sym}): Position is already FLAT (0) on broker! "
+                                f"Aborting exit-to-flat order. Synchronizing local state to FLAT."
+                            )
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked.pop(contract_sym, None)
+                            self.state_manager.update_tracked_positions(all_tracked)
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            continue
+
                         logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing SHORT pos ({pos}) to FLAT (opposite entry blocked: {block_reason}). Order Qty = {abs(pos)}")
                         resp = self.place_order(sym, contract_sym, action="BUY", quantity=abs(pos), candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
@@ -2313,6 +2397,13 @@ class NFOPortfolioLiveTrader:
                     if time_ok and universe_ok:
                         logger.info(f"🔄 [REVERSE LONG->SHORT] Reversing long position for {sym} ({contract_sym}) on candle {candle_time} (Trigger: ₹{trigger_price:.2f})")
                         reverse_qty = pos + order_qty
+                        actual_broker_qty = self.get_open_position(contract_sym)
+                        if actual_broker_qty == 0:
+                            logger.info(
+                                f"ℹ️ [REVERSAL ADJUSTMENT] {sym} ({contract_sym}): Prior position is already flat on broker. "
+                                f"Adjusting order quantity from {reverse_qty} to base entry size {order_qty}."
+                            )
+                            reverse_qty = order_qty
                         resp = self.place_order(sym, contract_sym, action="SELL", quantity=reverse_qty, candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
                             self.last_processed_candle[sym] = str(candle_time)
@@ -2352,6 +2443,19 @@ class NFOPortfolioLiveTrader:
                             # 3. New SHORT trade alert
                             self.dispatch_trade_alert(sym, contract_sym, "SELL", "SHORT", pos, order_qty, candle_time, trigger_price, resp, c)
                     else:
+                        actual_broker_qty = self.get_open_position(contract_sym)
+                        if actual_broker_qty == 0:
+                            logger.warning(
+                                f"🛑 [REVERSE ORDER PREVENTED] {sym} ({contract_sym}): Position is already FLAT (0) on broker! "
+                                f"Aborting exit-to-flat order. Synchronizing local state to FLAT."
+                            )
+                            all_tracked = self.state_manager.state.get("tracked_positions", {})
+                            all_tracked.pop(contract_sym, None)
+                            self.state_manager.update_tracked_positions(all_tracked)
+                            self.last_processed_candle[sym] = str(candle_time)
+                            self.state_manager.record_processed_candle(sym, candle_time)
+                            continue
+
                         logger.info(f"🔄 [EXIT TO FLAT] {sym} ({contract_sym}): Closing LONG pos ({pos}) to FLAT (opposite entry blocked: {block_reason}). Order Qty = {pos}")
                         resp = self.place_order(sym, contract_sym, action="SELL", quantity=pos, candle_time=candle_time, trigger_price=trigger_price)
                         if resp:
