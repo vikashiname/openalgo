@@ -51,6 +51,11 @@ liveonopenalgo/*_heartbeat.json
 liveonopenalgo/heartbeat.json
 liveonopenalgo/*.log
 liveonopenalgo/*.csv
+liveopenalgo/*_state.json
+liveopenalgo/*_heartbeat.json
+liveopenalgo/heartbeat.json
+liveopenalgo/*.log
+liveopenalgo/*.csv
 
 # Python cache
 __pycache__/
