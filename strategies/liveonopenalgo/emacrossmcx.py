@@ -1637,16 +1637,71 @@ class MCXEMACrossStrategy:
             logger.error(f"Failed to query position for {contract_symbol}: {e}")
         return 0
 
-    def get_all_open_positions(self) -> Dict[str, int]:
-        """Queries OpenAlgo /api/v1/positionbook and returns {contract_symbol: net_quantity}."""
+    def is_strategy_mcx_position(self, p: Dict[str, Any]) -> bool:
+        """
+        Determines whether a positionbook record belongs to this strategy's MCX commodity universe.
+        Prevents counting unrelated equity derivatives (NFO), indices, or other instruments.
+        """
+        if not isinstance(p, dict):
+            return False
+
+        sym = str(p.get("symbol", "")).strip().upper()
+        if not sym:
+            return False
+
+        exch = str(p.get("exchange", "") or p.get("exch", "")).strip().upper()
+        # If exchange is provided and not MCX, reject immediately
+        if exch and exch != "MCX":
+            return False
+
+        # 1. Exact match against known resolved active contracts in contract_cache
+        active_contracts = {
+            str(c.get("contract", "")).strip().upper()
+            for c in self.contract_cache.values()
+            if isinstance(c, dict) and c.get("contract")
+        }
+        if sym in active_contracts:
+            return True
+
+        # 2. Match against active target commodity symbols or prefixes
+        allowed_prefixes = set()
+        for base_sym in self.symbols:
+            allowed_prefixes.add(base_sym.upper())
+            spec = MCX_COMMODITY_SPECS.get(base_sym, {})
+            prefix = spec.get("search_prefix")
+            if prefix:
+                allowed_prefixes.add(prefix.upper())
+
+        # Also add aliases mapping to target symbols
+        for alias, target in SYMBOL_ALIASES.items():
+            if target in self.symbols:
+                allowed_prefixes.add(alias.upper())
+
+        for prefix in allowed_prefixes:
+            if sym.startswith(prefix):
+                return True
+
+        return False
+
+    def get_all_open_positions(self, only_strategy_universe: bool = True) -> Dict[str, int]:
+        """
+        Queries OpenAlgo /api/v1/positionbook and returns {contract_symbol: net_quantity}.
+        When only_strategy_universe is True (default), filters out non-MCX and unrelated instruments.
+        """
         pos_map = {}
         try:
             url = f"{self.host.rstrip('/')}/api/v1/positionbook"
             resp = requests.post(url, json={"apikey": self.api_key}, timeout=5)
             if resp.status_code == 200:
                 data = resp.json().get("data", {})
-                positions = data.get("positions", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                positions = (
+                    data.get("positions", [])
+                    if isinstance(data, dict)
+                    else (data if isinstance(data, list) else [])
+                )
                 for p in positions:
+                    if only_strategy_universe and not self.is_strategy_mcx_position(p):
+                        continue
                     sym = p.get("symbol")
                     qty = int(p.get("quantity", p.get("netqty", 0)))
                     if sym:
@@ -2417,7 +2472,9 @@ class MCXEMACrossStrategy:
                         )
 
         self.emit_heartbeat(status="ACTIVE", active_count=active_count)
-        logger.info(f"✅ [CYCLE COMPLETE] Active Positions: {active_count}")
+        active_symbols = [f"{sym} ({qty})" for sym, qty in open_positions.items() if qty != 0]
+        pos_summary_str = f" [{', '.join(active_symbols)}]" if active_symbols and active_count > 0 else ""
+        logger.info(f"✅ [CYCLE COMPLETE] Active MCX Positions: {active_count}{pos_summary_str}")
 
     def run_loop(self, poll_interval: int = POLL_INTERVAL_SECONDS):
         """Continuous production polling loop with exact candle boundary alignment."""
@@ -2906,6 +2963,66 @@ def run_automated_tests() -> bool:
         results.append((20, "Idempotency Lock prevents duplicate signal execution", True, "Duplicate signal rejected"))
     except Exception as e:
         results.append((20, "Idempotency Lock prevents duplicate signal execution", False, str(e)))
+
+    # 21. MCX Position Book Filtering: Excludes NFO/NSE non-commodity positions
+    try:
+        mock_eng_filter = MockMCXEngine(symbols=["GOLDM", "SILVERMIC", "CRUDEOILM"])
+        mock_eng_filter.contract_cache = {
+            "GOLDM": {"contract": "GOLDM05DEC26FUT"},
+            "SILVERMIC": {"contract": "SILVERMIC30NOV26FUT"},
+            "CRUDEOILM": {"contract": "CRUDEOILM19NOV26FUT"},
+        }
+        # Non-MCX positions (NFO, NSE) must be rejected
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "M&M23NOV26FUT", "exchange": "NFO", "quantity": -200}) is False
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "NIFTY29DEC26FUT", "exchange": "NFO", "quantity": 65}) is False
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "NIFTY29DEC2626400CE", "exchange": "NFO", "quantity": -65}) is False
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "BAJFINANCE23NOV26FUT", "exchange": "NFO", "quantity": 750}) is False
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "RELIANCE", "exchange": "NSE", "quantity": 100}) is False
+        # MCX commodity outside strategy universe must be rejected
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "COPPER30NOV26FUT", "exchange": "MCX", "quantity": 1}) is False
+        # Valid MCX strategy commodity positions must be accepted
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "SILVERMIC30NOV26FUT", "exchange": "MCX", "quantity": 0}) is True
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "GOLDM05DEC26FUT", "exchange": "MCX", "quantity": 1}) is True
+        assert mock_eng_filter.is_strategy_mcx_position({"symbol": "CRUDEOILM19NOV26FUT", "exchange": "MCX", "quantity": 10}) is True
+        results.append((21, "Positionbook Exchange & Universe Filter", True, "NFO/NSE positions strictly excluded from MCX strategy"))
+    except Exception as e:
+        results.append((21, "Positionbook Exchange & Universe Filter", False, str(e)))
+
+    # 22. Active Position Count Reconciliation with Mock Positionbook
+    try:
+        class MockPositionbookEngine(MockMCXEngine):
+            def __init__(self, mock_positions, *args, **kwargs):
+                self._mock_positions = mock_positions
+                super().__init__(*args, **kwargs)
+
+            def get_all_open_positions(self, only_strategy_universe: bool = True) -> Dict[str, int]:
+                pos_map = {}
+                for p in self._mock_positions:
+                    if only_strategy_universe and not self.is_strategy_mcx_position(p):
+                        continue
+                    sym = p.get("symbol")
+                    qty = int(p.get("quantity", p.get("netqty", 0)))
+                    if sym:
+                        pos_map[sym] = qty
+                return pos_map
+
+        sample_broker_positions = [
+            {"symbol": "M&M23NOV26FUT", "exchange": "NFO", "quantity": -200},
+            {"symbol": "NIFTY29DEC26FUT", "exchange": "NFO", "quantity": 65},
+            {"symbol": "NIFTY29DEC2626400CE", "exchange": "NFO", "quantity": -65},
+            {"symbol": "SILVERMIC30NOV26FUT", "exchange": "MCX", "quantity": 0},
+            {"symbol": "BAJFINANCE23NOV26FUT", "exchange": "NFO", "quantity": 750},
+        ]
+        eng_pb = MockPositionbookEngine(sample_broker_positions, symbols=["GOLDM", "SILVERMIC", "CRUDEOILM"])
+        pb_res = eng_pb.get_all_open_positions()
+        # Only SILVERMIC is an MCX strategy symbol in this book
+        assert list(pb_res.keys()) == ["SILVERMIC30NOV26FUT"]
+        # Its quantity is 0 (closed/flat)
+        active_mcx_count = len([q for q in pb_res.values() if q != 0])
+        assert active_mcx_count == 0
+        results.append((22, "Active MCX Position Count Calculation", True, "Evaluated to 0 active positions despite 4 active NFO positions"))
+    except Exception as e:
+        results.append((22, "Active MCX Position Count Calculation", False, str(e)))
 
     all_passed = True
     for tid, name, status, msg in results:

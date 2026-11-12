@@ -3,7 +3,7 @@
 
 **Document ID**: SOP-STRAT-003  
 **Classification**: Production Strategy Security & Operational Standards  
-**Target Environment**: Local Workspace & AWS EC2 Production (`https://vikashiname.in` / `13.203.187.139`)  
+**Target Environment**: Local Workspace & Oracle Cloud (OCI) Production (`https://vikashiname.in`)  
 **Applicability**: All strategies and harnesses in `strategies/liveonopenalgo/`, `strategies/production/`, and `strategies/research/`  
 **Last Updated**: 2026-10-06  
 
@@ -227,11 +227,36 @@ To guarantee crash safety and prevent race condition file corruptions when multi
 3. **Zero Intervention**:
    - Watchdog is strictly observational: ZERO automated restarts, ZERO order modifications.
 
+### Directive 10: Closed-Loop Continuous In-Loop Reconciliation & Reverse-Exit Order Block
+To prevent phantom position tracking, eliminate unintended reverse orders, and guarantee 100% synchronization between broker/exchange reality and strategy state:
+1. **Continuous In-Loop Broker Reconciliation**:
+   - Strategy execution engines must **never** rely solely on startup reconciliation or local state files.
+   - At the beginning of each execution cycle (or evaluation pass in `run_loop`), the engine must query the broker positionbook (`/api/v1/positionbook` or `/api/v1/openposition`).
+   - If an active position recorded in local persistent state is found to be `0` or absent on the broker (indicating an external manual square-off by the trader via the OpenAlgo Web UI or broker terminal):
+     - The engine MUST immediately synchronize its local persistent state to **FLAT (`0`)**.
+     - Log `🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for <SYMBOL> is FLAT on broker. Synchronizing local strategy state to FLAT (Reason: MANUAL_UI_EXIT)`.
+     - Automatically record the trade closure in trade history with `exit_reason: "MANUAL_UI_EXIT"` and update realized PnL.
+     - Automatically cancel/suppress any pending automated exit, target, or stop-loss orders for that instrument.
+2. **Reverse Exit Order Block (Pre-Exit Probe Guard)**:
+   - Before dispatching ANY exit or exit-to-flat order (`action="SELL"` to close LONG, or `action="BUY"` to close SHORT):
+     - The engine MUST verify whether the broker still holds the open position for that contract.
+     - If the position on the broker is already `0` (or flat), order dispatch MUST be **strictly blocked**:
+       `🛑 [REVERSE ORDER PREVENTED] Position for <SYMBOL> is already FLAT on broker! Aborting exit order to prevent unintended reverse position. Synchronizing local state to FLAT.`
+     - Zero orders must be submitted to the broker or paper trading engine.
+     - The local tracking dictionary must be cleared immediately.
+3. **Reversal Quantity Adjustment**:
+   - When processing a reversal signal (e.g. from LONG to SHORT):
+     - If the prior position was already squared off on the broker, the order quantity MUST automatically adjust from `pos + entry_qty` to `entry_qty` (base entry size), preventing unintentional over-sizing.
+4. **Asymmetric Multi-Leg Exposure Protection**:
+   - For multi-leg options/hedged strategies (e.g., Covered Call, Straddles, Spreads), if one leg is closed externally while another leg remains open, the engine must immediately flag a critical hazard (`🛑 [ASYMMETRIC EXPOSURE] - Naked Option / Naked Future Risk`), block automated exits, and alert the operator.
+5. **Fail-Closed on API Desynchronization**:
+   - If the broker positionbook or orderbook API returns an error or times out during reconciliation, automated entries and exits must fail-closed (pause execution cycles) rather than firing unverified orders into an uncertain market state.
+
 ---
 
 ## 6. Strategy Synchronization & Deployment Checklist
 
-Before rolling out updates to production (AWS EC2 / `vikashiname.in`):
+Before rolling out updates to production (Oracle Cloud / `vikashiname.in`):
 
 1. **Verify Local vs Production File Parity**:
    Ensure identical copies exist across working directories:
