@@ -1,0 +1,30 @@
+{
+  "active_position": null,
+  "total_realized_pnl": 0.0,
+  "trade_history": [
+    {
+      "entry_time": "2026-10-19 11:14:29 IST",
+      "fut_symbol": "NIFTY23NOV26FUT",
+      "fut_entry_price": 23197.3,
+      "fut_qty": 65,
+      "call_symbol": "NIFTY23NOV2623900CE",
+      "call_strike": 23900.0,
+      "call_expiry": "23-NOV-26",
+      "call_entry_price": 108.15,
+      "call_qty": 65,
+      "call_delta": 0.30465273486801425,
+      "target_price": 10.81,
+      "stoploss_price": 324.45,
+      "roll_dte": 10,
+      "mode": "ANALYZE",
+      "exit_time": "2026-10-19 12:39:28 IST",
+      "exit_reason": "MANUAL_UI_EXIT",
+      "fut_exit_price": 23197.3,
+      "call_exit_price": 108.15,
+      "fut_pnl": 0.0,
+      "opt_pnl": 0.0,
+      "total_pnl": 0.0
+    }
+  ],
+  "last_scan_ist": "2026-10-19 12:39:27 IST"
+}

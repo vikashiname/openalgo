@@ -1,0 +1,11 @@
+# Local artifacts and caches
+strategy.log
+strategy_state.json
+strategy_heartbeat.json
+*.tmp
+__pycache__/
+
+# Data and report caches
+data/*.csv
+reports/*.csv
+reports/*.json

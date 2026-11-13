@@ -104,6 +104,12 @@ def main():
             short_tp_pct=exp.get("short_tp_pct", 1.5),
             sl_pct=exp.get("sl_pct", 6.0),
             atr_mult=exp.get("atr_mult", 2.0),
+            enable_runner=exp.get("enable_runner", False),
+            runner_trail_pct=exp.get("runner_trail_pct", 0.35),
+            runner_profit_floor_pct=exp.get("runner_profit_floor_pct", 0.50),
+            early_long_tp_pct=exp.get("early_long_tp_pct", 0.0),
+            early_short_tp_pct=exp.get("early_short_tp_pct", 0.0),
+            move_sl_to_be=exp.get("move_sl_to_be", False),
             htf_bias_map=htf_bias_map,
         )
 

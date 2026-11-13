@@ -1086,3 +1086,31 @@ When preparing, modifying, or operating production trading strategies (e.g. `str
    * Avoid creating duplicate timestamped strategy files.
    * Preserve PID tracking, audit logs and persistent state continuity.
 
+---
+
+# 28. INSTITUTIONAL ALWAYS-IN-SYNC CLOSED-LOOP CONTINUOUS RECONCILIATION & REVERSE-ORDER BLOCK
+
+To eliminate phantom position tracking and completely block accidental reverse exit orders across all OpenAlgo strategies:
+
+1. **Closed-Loop In-Loop Positionbook Reconciliation**
+   * Strategies must continuously query the broker positionbook (`/api/v1/positionbook` or `/api/v1/openposition`) at each execution cycle or candle boundary.
+   * If a position recorded in local state is confirmed flat (`0` quantity) on the broker (e.g. manually closed by the user in the OpenAlgo UI or broker app):
+     * The strategy MUST immediately synchronize its local persistent state to **FLAT**.
+     * Log: `🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for <SYMBOL> is FLAT on broker. Synchronizing local strategy state to FLAT (Reason: MANUAL_UI_EXIT)`.
+     * Record the exit trade in history and update realized PnL.
+     * Suppress and abort any automated exit orders for that position.
+
+2. **Reverse Exit Order Block (Pre-Exit Probe Guard)**
+   * Before dispatching an exit or exit-to-flat order (`SELL` to close LONG, or `BUY` to close SHORT):
+     * Verify whether the broker still holds an open position.
+     * If the broker position is already `0`, the exit order MUST be BLOCKED immediately.
+     * Log: `🛑 [REVERSE ORDER PREVENTED] Position for <SYMBOL> is already FLAT on broker! Aborting exit order to prevent unintended reverse position.`
+     * Prevent placing the order to avoid opening an unwanted opposite/reverse position.
+
+3. **Reversal Size Adaptation**
+   * On opposite entry signals (reversals), if the prior position is already flat on the broker, adjust order quantity to the base entry size rather than `abs(prior_pos) + base_size`.
+
+4. **Fail-Closed Safety on API Uncertainty**
+   * If broker positionbook queries fail or pending orders exist in the orderbook, automated orders must pause rather than executing unverified actions.
+
+

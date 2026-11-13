@@ -1,0 +1,87 @@
+{
+  "experiment_id": "EXP-FUT-BW-001",
+  "strategy_name": "NIFTY Synthetic Futures Buy-Write with Liquid Treasury Yield Overlay",
+  "version": "1.0.0",
+  "date_created": "2026-10-13",
+  "author": "Antigravity Institutional Optimization Lab",
+  "benchmark_baseline": "EXP-000-BASE",
+  "benchmark_candidate": "EXP-064-INT5",
+  "instruments": {
+    "long_leg": "FUTIDX NIFTY (NSE Index Futures)",
+    "short_leg": "OPTIDX NIFTY CE (European Call Option)",
+    "collateral_leg": "Institutional Liquid ETF / Overnight TREPS (Yield Overlay)"
+  },
+  "capital": {
+    "initial_capital_inr": 1500000.0,
+    "risk_free_rate_pa": 0.065,
+    "liquid_net_yield_pa": 0.048,
+    "sebi_cash_collateral_ratio": 0.50
+  },
+  "strategy_rules": {
+    "strike_selection_mode": "delta",
+    "target_delta": 0.25,
+    "target_dte_days": 28,
+    "profit_target_decay_pct": 0.80,
+    "stop_loss_multiple": 3.0,
+    "roll_mode": "trading_sessions",
+    "roll_threshold_trading_sessions": 7,
+    "trend_filter": "EMA_100 (spot > ema_100)",
+    "min_option_premium_inr": 1.0,
+    "position_sizing": "1 matching lot (100% covered parity)"
+  },
+  "lot_size_schedule": [
+    {
+      "start_date": "2019-02-11",
+      "end_date": "2021-06-24",
+      "lot_size": 75,
+      "circular": "NSE/FAOP/28362"
+    },
+    {
+      "start_date": "2021-06-25",
+      "end_date": "2024-04-25",
+      "lot_size": 50,
+      "circular": "NSE/FAOP/47743"
+    },
+    {
+      "start_date": "2024-04-26",
+      "end_date": "2024-11-19",
+      "lot_size": 25,
+      "circular": "NSE/FAOP/61327"
+    },
+    {
+      "start_date": "2024-11-20",
+      "end_date": "2026-09-04",
+      "lot_size": 75,
+      "circular": "NSE/FAOP/64442"
+    }
+  ],
+  "futures_frictions": {
+    "brokerage_per_order_inr": 20.0,
+    "stt_sell_pre_oct2024": 0.000125,
+    "stt_sell_post_oct2024": 0.000200,
+    "exchange_txn_fee_rate": 0.0000173,
+    "sebi_turnover_rate": 0.0000010,
+    "stamp_duty_buy_rate": 0.0000200,
+    "gst_rate": 0.18,
+    "slippage_points": 1.0
+  },
+  "option_frictions": {
+    "brokerage_per_order_inr": 20.0,
+    "stt_sell_pre_oct2024": 0.000625,
+    "stt_sell_post_oct2024": 0.001000,
+    "exchange_txn_fee_rate": 0.0003503,
+    "sebi_turnover_rate": 0.0000010,
+    "stamp_duty_buy_rate": 0.0000300,
+    "gst_rate": 0.18,
+    "slippage_rate": 0.010,
+    "min_slippage_points": 0.25
+  },
+  "margin_model": {
+    "type": "NSE_SPAN_EXPOSURE_HEDGED_REPLICA",
+    "base_psr": 0.08,
+    "vol_scaling_factor": 3.5,
+    "elm_rate": 0.02,
+    "hedge_credit_offset": true,
+    "formula": "max(0, (PSR(t) * Spot(t) - CallPrice(t)) * Lot) + (0.02 * Spot(t) * Lot)"
+  }
+}

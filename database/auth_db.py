@@ -599,15 +599,18 @@ def decrypt_token(encrypted_token):
         return None
 
 
-def upsert_auth(name, auth_token, broker, feed_token=None, user_id=None, revoke=False):
+def upsert_auth(
+    name, auth_token, broker, feed_token=None, user_id=None, revoke=False, refresh_token=None
+):
     """Store encrypted auth token and feed token if provided.
 
     Also publishes cache invalidation events via ZeroMQ for multi-process deployments.
     This ensures WebSocket proxy and other processes clear their stale cached tokens.
     See GitHub issue #765 for details on the cross-process cache synchronization problem.
     """
-    encrypted_token = encrypt_token(auth_token)
+    encrypted_token = encrypt_token(auth_token) if auth_token else None
     encrypted_feed_token = encrypt_token(feed_token) if feed_token else None
+    encrypted_refresh_token = encrypt_token(refresh_token) if refresh_token else None
 
     auth_obj = Auth.query.filter_by(name=name).first()
 
@@ -638,19 +641,36 @@ def upsert_auth(name, auth_token, broker, feed_token=None, user_id=None, revoke=
         )
 
     if auth_obj:
-        auth_obj.auth = encrypted_token
-        auth_obj.feed_token = encrypted_feed_token
+        if encrypted_token is not None:
+            auth_obj.auth = encrypted_token
+        if encrypted_feed_token is not None or feed_token is None:
+            auth_obj.feed_token = encrypted_feed_token
         auth_obj.broker = broker
         auth_obj.user_id = user_id
         auth_obj.is_revoked = revoke
+        if encrypted_refresh_token:
+            import pytz
+            from datetime import datetime
+
+            auth_obj.aux_param1 = encrypted_refresh_token
+            auth_obj.aux_param2 = datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
     else:
+        import pytz
+        from datetime import datetime
+
         auth_obj = Auth(
             name=name,
-            auth=encrypted_token,
+            auth=encrypted_token or "",
             feed_token=encrypted_feed_token,
             broker=broker,
             user_id=user_id,
             is_revoked=revoke,
+            aux_param1=encrypted_refresh_token,
+            aux_param2=(
+                datetime.now(pytz.timezone("Asia/Kolkata")).isoformat()
+                if encrypted_refresh_token
+                else None
+            ),
         )
         db_session.add(auth_obj)
     db_session.commit()
@@ -1417,3 +1437,72 @@ def samco_has_registered_ip(user_id):
     """Check if a Samco user has registered IPs."""
     record = _get_samco_auth(user_id)
     return record is not None and record.primary_ip is not None
+
+
+def revoke_auth_token(name: str = "vikashiname") -> bool:
+    """Explicitly revoke authentication for a user to trigger fail-closed lockout.
+
+    Sets is_revoked = True, clears caches, publishes cache invalidation,
+    cleans up WebSocket pools, and stops the order update adapter.
+    """
+    try:
+        auth_obj = Auth.query.filter_by(name=name).first()
+        if not auth_obj:
+            logger.warning(f"No auth record found to revoke for user: {name}")
+            return False
+
+        auth_obj.is_revoked = True
+        db_session.commit()
+
+        # Clear all in-memory caches
+        auth_cache.clear()
+        feed_token_cache.clear()
+        broker_cache.clear()
+        logger.info(f"Cleared all auth caches after revoking auth for user: {name}")
+
+        # Invalidate multi-process and in-process WebSocket pools
+        try:
+            from database.cache_invalidation import publish_all_cache_invalidation
+
+            publish_all_cache_invalidation(name)
+        except Exception as e:
+            logger.warning(f"Failed to publish cache invalidation on revoke: {e}")
+
+        try:
+            from websocket_proxy.broker_factory import cleanup_pools_for_user
+
+            cleanup_pools_for_user(name, broker_name=auth_obj.broker)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup WS pools on revoke: {e}")
+
+        try:
+            from services.order_update_service import stop_order_update_adapter
+
+            stop_order_update_adapter(name)
+        except Exception as e:
+            logger.warning(f"Failed to stop order update adapter on revoke: {e}")
+
+        return True
+    except Exception as e:
+        db_session.rollback()
+        logger.exception(f"Error revoking auth for user {name}: {e}")
+        return False
+
+
+def get_fyers_refresh_token(name: str = "vikashiname") -> tuple[str | None, str | None]:
+    """Retrieve decrypted refresh token and timestamp for FYERS from aux_param1 and aux_param2.
+
+    Returns:
+        (refresh_token, created_at_iso) or (None, None)
+    """
+    try:
+        auth_obj = Auth.query.filter_by(name=name, broker="fyers").first()
+        if not auth_obj or not auth_obj.aux_param1:
+            return None, None
+        refresh_token = decrypt_token(auth_obj.aux_param1)
+        created_at = auth_obj.aux_param2
+        return refresh_token, created_at
+    except Exception as e:
+        logger.exception(f"Error reading FYERS refresh token for {name}: {e}")
+        return None, None
+

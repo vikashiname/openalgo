@@ -150,6 +150,13 @@ SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
 CATASTROPHE_SL_PCT = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
 ORDER_PACING_DELAY_SEC = float(os.getenv("ORDER_PACING_DELAY_SEC", "0.25"))
 
+# Early Profit-Taking & Break-Even Stop Loss Parameters (V3.1 Upgrade)
+EARLY_LONG_TP_PCT = float(os.getenv("EARLY_LONG_TP_PCT", "1.50"))        # Early milestone target (Long: +1.50%)
+EARLY_SHORT_TP_PCT = float(os.getenv("EARLY_SHORT_TP_PCT", "1.20"))      # Early milestone target (Short: -1.20%)
+MOVE_SL_TO_BE = os.getenv("MOVE_SL_TO_BE", "true").lower() in ["true", "1", "yes"]   # Lock Stop-Loss at Break-Even
+ENABLE_PARTIAL_PROFIT = os.getenv("ENABLE_PARTIAL_PROFIT", "false").lower() in ["true", "1", "yes"]  # Scale out 50% on multi-lot
+RUNNER_PROFIT_FLOOR_PCT = float(os.getenv("RUNNER_PROFIT_FLOOR_PCT", "0.50"))  # Guaranteed profit floor once runner active
+
 # Target-to-Runner Optimization Parameters (Champion Research Architecture)
 ENABLE_TRAILING_RUNNER = os.getenv("ENABLE_TRAILING_RUNNER", "true").lower() in ["true", "1", "yes"]
 RUNNER_TRAIL_PCT = float(os.getenv("RUNNER_TRAIL_PCT", "0.35"))  # 0.35% High-Water-Mark pullback trail
@@ -289,8 +296,7 @@ TOP_LONGS = {
     "BAJFINANCE", "NTPC"
 }
 TOP_SHORTS = {
-    "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC",
-    "NIFTY"
+    "SUNPHARMA", "BAJAJ-AUTO", "M&M", "BPCL", "NTPC"
 }
 BLACKLIST_AVOID = {
     "ITC", "ONGC", "ADANIENT", "DRREDDY", "INFY"
@@ -950,6 +956,9 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
     elif exit_reason == "RUNNER_HWM_TRAIL":
         reason_header = "🏃 RUNNER TRAIL HIT"
         reason_badge = "🏃 <b>HIGH-WATER-MARK TRAILING STOP TRIGGERED</b>"
+    elif exit_reason == "BREAK_EVEN_SL":
+        reason_header = "🛡️ BREAK-EVEN STOP-LOSS"
+        reason_badge = "🛡️ <b>BREAK-EVEN STOP-LOSS TRIGGERED (CAPITAL PROTECTED)</b>"
     elif exit_reason == "CATASTROPHE_SL":
         reason_header = "🛑 CATASTROPHE STOP-LOSS"
         reason_badge = "🛑 <b>EMERGENCY STOP LOSS TRIGGERED</b>"
@@ -1486,6 +1495,11 @@ class EMACrossPaperTradingEngine:
         self.enable_trailing_runner = ENABLE_TRAILING_RUNNER
         self.runner_trail_pct = RUNNER_TRAIL_PCT
         self.runner_trail_mode = RUNNER_TRAIL_MODE
+        self.early_long_tp_pct = EARLY_LONG_TP_PCT
+        self.early_short_tp_pct = EARLY_SHORT_TP_PCT
+        self.move_sl_to_be = MOVE_SL_TO_BE
+        self.enable_partial_profit = ENABLE_PARTIAL_PROFIT
+        self.runner_profit_floor_pct = RUNNER_PROFIT_FLOOR_PCT
 
         # Connection-pooled HTTP session for efficient fallback data fetching
         self.session = requests.Session()
@@ -1822,6 +1836,14 @@ class EMACrossPaperTradingEngine:
                 )
                 send_telegram_alert(alert_msg)
 
+        # Closed-Loop External Manual Exit Detection (Detect UI Square-Offs)
+        for contract_sym, pos_data in local_tracked.items():
+            if contract_sym not in tracked_map:
+                logger.warning(
+                    f"🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for {contract_sym} is FLAT on broker. "
+                    f"Local strategy state reconciled to FLAT (Reason: MANUAL_UI_EXIT)."
+                )
+
         self.state_manager.update_tracked_positions(tracked_map)
         self.state_manager.record_reconciliation_audit({
             "total_open_positions": len(reconciled_positions),
@@ -2124,6 +2146,7 @@ class EMACrossPaperTradingEngine:
         action: str,
         quantity: int,
         candle_time: Any = None,
+        reference_price: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Resilient Paper Order Placement Engine with Pre-Flight Safety & Idempotency.
@@ -2163,6 +2186,10 @@ class EMACrossPaperTradingEngine:
         attempt = 0
         resp = None
 
+        order_kwargs: Dict[str, Any] = {}
+        if reference_price is not None and float(reference_price) > 0:
+            order_kwargs["price"] = float(reference_price)
+
         while attempt < max_attempts:
             attempt += 1
             try:
@@ -2175,6 +2202,7 @@ class EMACrossPaperTradingEngine:
                         price_type="MARKET",
                         product=PRODUCT,
                         quantity=quantity,
+                        **order_kwargs,
                     )
                 else:
                     order_url = f"{self.host.rstrip('/')}/api/v1/placeorder"
@@ -2187,6 +2215,7 @@ class EMACrossPaperTradingEngine:
                         "price_type": "MARKET",
                         "product": PRODUCT,
                         "quantity": quantity,
+                        **order_kwargs,
                     }
                     r = requests.post(order_url, json=payload, timeout=8)
                     resp = r.json() if r.status_code == 200 else {"status": "error", "message": r.text}
@@ -2458,26 +2487,41 @@ class EMACrossPaperTradingEngine:
         long_catastrophe_px = entry_price * (1.0 - (CATASTROPHE_SL_PCT / 100.0))
         short_catastrophe_px = entry_price * (1.0 + (CATASTROPHE_SL_PCT / 100.0))
 
+        early_long_tp_pct = getattr(self, "early_long_tp_pct", EARLY_LONG_TP_PCT)
+        early_short_tp_pct = getattr(self, "early_short_tp_pct", EARLY_SHORT_TP_PCT)
+        early_long_target_px = entry_price * (1.0 + (early_long_tp_pct / 100.0))
+        early_short_target_px = entry_price * (1.0 - (early_short_tp_pct / 100.0))
+
         target_hit = False
         catastrophe_hit = False
+        early_target_hit = False
+        be_sl_hit = False
         target_exit_px = 0.0
         sl_exit_px = 0.0
 
         # Retrieve runner state for this position (if any)
         runner_active = bool(pos_info.get("runner_active", False))
+        already_early_hit = bool(pos_info.get("early_target_hit", False))
+        be_stop_active = bool(pos_info.get("be_stop_active", False))
         peak_price = float(pos_info.get("peak_price", entry_price))
         trough_price = float(pos_info.get("trough_price", entry_price))
 
         if direction == "LONG":
             target_hit = candle_high >= long_target_px
             catastrophe_hit = candle_low <= long_catastrophe_px
+            early_target_hit = candle_high >= early_long_target_px
             target_exit_px = round(long_target_px, 2)
             sl_exit_px = round(long_catastrophe_px, 2)
+            if be_stop_active:
+                be_sl_hit = candle_low <= entry_price
         elif direction == "SHORT":
             target_hit = candle_low <= short_target_px
             catastrophe_hit = candle_high >= short_catastrophe_px
+            early_target_hit = candle_low <= early_short_target_px
             target_exit_px = round(short_target_px, 2)
             sl_exit_px = round(short_catastrophe_px, 2)
+            if be_stop_active:
+                be_sl_hit = candle_high >= entry_price
         else:
             return False
 
@@ -2486,13 +2530,16 @@ class EMACrossPaperTradingEngine:
             exit_reason = "CATASTROPHE_SL"
             expected_exit_px = sl_exit_px
 
-        # 2. If runner is already active, evaluate HWM trailing stop
+        # 2. If runner is already active, evaluate HWM trailing stop with guaranteed profit floor
         elif runner_active and getattr(self, "enable_trailing_runner", True):
             trail_pct = getattr(self, "runner_trail_pct", RUNNER_TRAIL_PCT)
+            floor_pct = getattr(self, "runner_profit_floor_pct", RUNNER_PROFIT_FLOOR_PCT)
             if direction == "LONG":
                 peak_price = max(peak_price, candle_high)
                 pos_info["peak_price"] = peak_price
-                effective_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                raw_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                guaranteed_floor = entry_price * (1.0 + (floor_pct / 100.0))
+                effective_trail_sl = max(raw_trail_sl, guaranteed_floor, entry_price)
                 pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
                 if candle_low <= effective_trail_sl:
                     exit_reason = "RUNNER_HWM_TRAIL"
@@ -2504,7 +2551,9 @@ class EMACrossPaperTradingEngine:
             else:  # SHORT
                 trough_price = min(trough_price, candle_low)
                 pos_info["trough_price"] = trough_price
-                effective_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                raw_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                guaranteed_floor = entry_price * (1.0 - (floor_pct / 100.0))
+                effective_trail_sl = min(raw_trail_sl, guaranteed_floor, entry_price)
                 pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
                 if candle_high >= effective_trail_sl:
                     exit_reason = "RUNNER_HWM_TRAIL"
@@ -2514,38 +2563,65 @@ class EMACrossPaperTradingEngine:
                     self.state_manager.update_tracked_positions(tracked_positions)
                     return False
 
-        # 3. Target Hit reached for the first time
+        # 3. Break-Even Stop Hit (Triggered if early target was achieved and price pulled back to entry)
+        elif be_stop_active and be_sl_hit:
+            exit_reason = "BREAK_EVEN_SL"
+            expected_exit_px = round(entry_price, 2)
+
+        # 4. Target Hit reached for the first time
         elif target_hit:
             trail_mode = getattr(self, "runner_trail_mode", RUNNER_TRAIL_MODE)
             trail_enabled = getattr(self, "enable_trailing_runner", True)
             trail_pct = getattr(self, "runner_trail_pct", RUNNER_TRAIL_PCT)
+            floor_pct = getattr(self, "runner_profit_floor_pct", RUNNER_PROFIT_FLOOR_PCT)
             if trail_enabled and trail_mode == "HWM":
-                # Convert position to a Trailing Runner rather than exiting completely
+                # Convert position to a Trailing Runner with guaranteed profit floor
                 pos_info["runner_active"] = True
                 pos_info["target_hit_candle"] = candle_iso
+                pos_info["early_target_hit"] = True
+                pos_info["be_stop_active"] = True
                 if direction == "LONG":
                     peak_price = max(entry_price, candle_high)
                     pos_info["peak_price"] = peak_price
-                    effective_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                    raw_trail_sl = peak_price * (1.0 - (trail_pct / 100.0))
+                    guaranteed_floor = entry_price * (1.0 + (floor_pct / 100.0))
+                    effective_trail_sl = max(raw_trail_sl, guaranteed_floor, entry_price)
                     pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
                     logger.info(
                         f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Long Target {LONG_PROFIT_TARGET_PCT}% reached on candle {candle_time_str} | "
-                        f"Peak: ₹{peak_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (-{trail_pct}%)"
+                        f"Peak: ₹{peak_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (Floor: +{floor_pct}%)"
                     )
                 else:
                     trough_price = min(entry_price, candle_low)
                     pos_info["trough_price"] = trough_price
-                    effective_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                    raw_trail_sl = trough_price * (1.0 + (trail_pct / 100.0))
+                    guaranteed_floor = entry_price * (1.0 - (floor_pct / 100.0))
+                    effective_trail_sl = min(raw_trail_sl, guaranteed_floor, entry_price)
                     pos_info["effective_trail_sl"] = round(effective_trail_sl, 2)
                     logger.info(
                         f"🏃 [RUNNER ACTIVATED] {symbol} ({contract_sym}): Short Target {SHORT_PROFIT_TARGET_PCT}% reached on candle {candle_time_str} | "
-                        f"Trough: ₹{trough_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (+{trail_pct}%)"
+                        f"Trough: ₹{trough_price:.2f} | HWM Trail SL: ₹{effective_trail_sl:.2f} (Floor: +{floor_pct}%)"
                     )
                 self.state_manager.update_tracked_positions(tracked_positions)
                 return False
             else:
                 exit_reason = "TARGET_HIT"
                 expected_exit_px = target_exit_px
+
+        # 5. Early Profit Milestone reached (Lock Stop-Loss at Break-Even)
+        elif early_target_hit and not already_early_hit:
+            pos_info["early_target_hit"] = True
+            pos_info["early_target_candle"] = candle_iso
+            move_be = getattr(self, "move_sl_to_be", MOVE_SL_TO_BE)
+            if move_be:
+                pos_info["be_stop_active"] = True
+                logger.info(
+                    f"🛡️ [EARLY PROFIT MILESTONE] {symbol} ({contract_sym}): Early target "
+                    f"({early_long_tp_pct if direction == 'LONG' else early_short_tp_pct}%) touched on candle {candle_time_str} | "
+                    f"Stop-Loss moved to Break-Even (₹{entry_price:.2f}). Downside risk eliminated!"
+                )
+            self.state_manager.update_tracked_positions(tracked_positions)
+            return False
 
         else:
             return False
@@ -2567,12 +2643,27 @@ class EMACrossPaperTradingEngine:
             f"Low: ₹{candle_low:.2f} | Close: ₹{candle_close:.2f} | Action: {exit_action} {exit_qty}"
         )
 
+        # Closed-Loop Reverse-Order Guard: verify broker holds open position before sending exit order
+        actual_broker_qty = self.get_open_position(contract_sym)
+        if actual_broker_qty == 0:
+            logger.warning(
+                f"🛑 [REVERSE ORDER PREVENTED] {symbol} ({contract_sym}): Position is already FLAT (0) on broker! "
+                f"Aborting {exit_action} exit order to prevent unintended reverse position. Synchronizing local state to FLAT."
+            )
+            tracked_positions = self.state_manager.state.get("tracked_positions", {})
+            tracked_positions.pop(contract_sym, None)
+            self.state_manager.update_tracked_positions(tracked_positions)
+            self.state_manager.record_signal_processed(exit_key)
+            self.state_manager.record_processed_candle(symbol, candle_iso)
+            return True
+
         resp = self.place_paper_order(
             symbol=symbol,
             contract_symbol=contract_sym,
             action=exit_action,
             quantity=exit_qty,
             candle_time=candle_iso,
+            reference_price=candle_close,
         )
 
         if resp:
@@ -2852,6 +2943,29 @@ class EMACrossPaperTradingEngine:
         if not action or exec_qty <= 0:
             return False, active_positions_count
 
+        # Closed-Loop Reverse-Order & Reversal Size Guard
+        if is_exit_to_flat:
+            actual_broker_qty = self.get_open_position(contract_sym)
+            if actual_broker_qty == 0:
+                logger.warning(
+                    f"🛑 [REVERSE ORDER PREVENTED] {symbol} ({contract_sym}): Position is already FLAT (0) on broker! "
+                    f"Aborting exit-to-flat order. Synchronizing local state to FLAT."
+                )
+                tracked_positions = self.state_manager.state.get("tracked_positions", {})
+                tracked_positions.pop(contract_sym, None)
+                self.state_manager.update_tracked_positions(tracked_positions)
+                self.state_manager.record_signal_processed(signal_key)
+                return False, active_positions_count
+        elif is_reversal:
+            actual_broker_qty = self.get_open_position(contract_sym)
+            if actual_broker_qty == 0:
+                logger.info(
+                    f"ℹ️ [REVERSAL ADJUSTMENT] {symbol} ({contract_sym}): Prior position is already flat on broker. "
+                    f"Adjusting order quantity from {exec_qty} to base entry size {base_order_qty}."
+                )
+                exec_qty = base_order_qty
+                is_reversal = False
+
         # Place the Paper Order
         resp = self.place_paper_order(
             symbol=symbol,
@@ -2859,6 +2973,7 @@ class EMACrossPaperTradingEngine:
             action=action,
             quantity=exec_qty,
             candle_time=candle_iso,
+            reference_price=float(sig_data.get("close", 0.0)),
         )
 
         if resp:
@@ -3115,8 +3230,21 @@ class EMACrossPaperTradingEngine:
 
         self.refresh_contracts()
 
-        # Query existing open positions from broker/engine
+        # In-Loop Closed-Loop Reconciliation: Synchronize tracked positions with broker positionbook
         open_positions = self.get_all_open_positions()
+        local_tracked = self.state_manager.state.get("tracked_positions", {})
+        cleaned_tracked = {}
+        for c_sym, p_data in local_tracked.items():
+            if c_sym in open_positions:
+                cleaned_tracked[c_sym] = p_data
+            else:
+                logger.warning(
+                    f"🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for {c_sym} is FLAT on broker. "
+                    f"Local strategy state reconciled to FLAT (Reason: MANUAL_UI_EXIT)."
+                )
+        if len(cleaned_tracked) != len(local_tracked):
+            self.state_manager.update_tracked_positions(cleaned_tracked)
+
         active_positions_count = len(open_positions)
         max_cap_str = "Unlimited" if self.max_active <= 0 else str(self.max_active)
         logger.info(
@@ -4682,6 +4810,141 @@ def run_automated_tests() -> bool:
         results.append((39, "HWM Trailing Runner exits on pullback breach", True, "Runner successfully closed at trail SL; alert emitted with RUNNER TRAIL HIT"))
     except Exception as e:
         results.append((39, "HWM Trailing Runner exits on pullback breach", False, str(e)))
+
+    # 40. Early Profit Milestone triggers and moves SL to Break-Even (entry_price)
+    try:
+        tmp_state40 = Path(f"/tmp/test_early_tp_{int(time.time()*1000)}.json")
+        engine40 = MockTestEngine(symbols=["RELIANCE"], lots=1, max_active=10)
+        engine40.state_manager = PersistentStateManager(tmp_state40)
+        engine40.early_long_tp_pct = 1.50
+        engine40.move_sl_to_be = True
+        contract_sym40 = "RELIANCE26SEPFUT"
+        engine40.state_manager.update_tracked_positions({
+            contract_sym40: {
+                "contract": contract_sym40,
+                "base_symbol": "RELIANCE",
+                "direction": "LONG",
+                "quantity": 250,
+                "average_price": 2000.0,
+                "candle_time": "08-Sep-2026 13:15",
+                "last_order_id": "ORD_ENTRY_40",
+            }
+        })
+        mock_cli40 = MagicMock()
+        engine40.client = mock_cli40
+        engine40.verify_paper_mode = lambda: (True, "analyze")
+
+        # Candle reaches +1.75% high (2035.0 >= 2030.0), but does not hit main target +3.0% (2060.0)
+        df40 = make_test_df([
+            {"close": 2000.0, "high": 2010.0, "low": 1990.0, "open": 1995.0},
+            {"close": 2025.0, "high": 2035.0, "low": 2005.0, "open": 2010.0},
+        ])
+        exited40 = engine40.check_and_execute_target_or_sl("RELIANCE", contract_sym40, df40)
+        assert exited40 is False, "Position should NOT exit on early milestone touch"
+        tracked40 = engine40.state_manager.state.get("tracked_positions", {}).get(contract_sym40)
+        assert tracked40 is not None, "Tracked position missing"
+        assert tracked40.get("early_target_hit") is True, "early_target_hit flag was not set"
+        assert tracked40.get("be_stop_active") is True, "be_stop_active flag was not set"
+        mock_cli40.placeorder.assert_not_called()
+        if tmp_state40.exists():
+            tmp_state40.unlink()
+        results.append((40, "Early profit milestone activates Break-Even stop", True, "Early target +1.5% detected; Stop-Loss moved to Break-Even (2000.0) without premature exit"))
+    except Exception as e:
+        results.append((40, "Early profit milestone activates Break-Even stop", False, str(e)))
+
+    # 41. Post-early milestone pullback breaches Break-Even stop -> exits cleanly at BREAK_EVEN_SL
+    try:
+        tmp_state41 = Path(f"/tmp/test_be_exit_{int(time.time()*1000)}.json")
+        engine41 = MockTestEngine(symbols=["RELIANCE"], lots=1, max_active=10)
+        engine41.state_manager = PersistentStateManager(tmp_state41)
+        engine41.move_sl_to_be = True
+        contract_sym41 = "RELIANCE26SEPFUT"
+        engine41.state_manager.update_tracked_positions({
+            contract_sym41: {
+                "contract": contract_sym41,
+                "base_symbol": "RELIANCE",
+                "direction": "LONG",
+                "quantity": 250,
+                "average_price": 2000.0,
+                "candle_time": "08-Sep-2026 13:15",
+                "last_order_id": "ORD_ENTRY_41",
+                "early_target_hit": True,
+                "be_stop_active": True,
+            }
+        })
+        mock_cli41 = MagicMock()
+        mock_cli41.placeorder.return_value = {"status": "success", "orderid": "EXIT_BE_41", "mode": "analyze"}
+        mock_cli41.orderstatus.return_value = {"status": "success", "data": {"average_price": 2000.0}}
+        engine41.client = mock_cli41
+        engine41.verify_paper_mode = lambda: (True, "analyze")
+
+        # Next candle pulls back to 1995.0 <= entry_price 2000.0
+        df41 = make_test_df([
+            {"close": 2025.0, "high": 2035.0, "low": 2010.0, "open": 2015.0},
+            {"close": 1998.0, "high": 2015.0, "low": 1995.0, "open": 2012.0},
+        ])
+        exit_msgs41 = []
+        with patch(f"{__name__}.send_telegram_alert", side_effect=lambda m: exit_msgs41.append(m)):
+            exited41 = engine41.check_and_execute_target_or_sl("RELIANCE", contract_sym41, df41)
+        assert exited41 is True, "Break-even stop failed to trigger exit"
+        mock_cli41.placeorder.assert_called_once()
+        order_call41 = mock_cli41.placeorder.call_args[1]
+        assert order_call41["action"] == "SELL"
+        assert order_call41["quantity"] == 250
+        assert len(exit_msgs41) == 1
+        assert "BREAK-EVEN STOP-LOSS" in exit_msgs41[0]
+        tracked41 = engine41.state_manager.state.get("tracked_positions", {})
+        assert contract_sym41 not in tracked41, "Position not cleared after Break-Even exit"
+        if tmp_state41.exists():
+            tmp_state41.unlink()
+        results.append((41, "Break-Even SL triggers on pullback to entry price", True, "Position closed at entry price with BREAK_EVEN_SL; capital protected"))
+    except Exception as e:
+        results.append((41, "Break-Even SL triggers on pullback to entry price", False, str(e)))
+
+    # 42. Trailing Runner clamps to guaranteed profit floor
+    try:
+        tmp_state42 = Path(f"/tmp/test_runner_floor_{int(time.time()*1000)}.json")
+        engine42 = MockTestEngine(symbols=["RELIANCE"], lots=1, max_active=10)
+        engine42.state_manager = PersistentStateManager(tmp_state42)
+        engine42.enable_trailing_runner = True
+        engine42.runner_trail_mode = "HWM"
+        engine42.runner_trail_pct = 0.35
+        engine42.runner_profit_floor_pct = 0.50
+        contract_sym42 = "RELIANCE26SEPFUT"
+        engine42.state_manager.update_tracked_positions({
+            contract_sym42: {
+                "contract": contract_sym42,
+                "base_symbol": "RELIANCE",
+                "direction": "LONG",
+                "quantity": 250,
+                "average_price": 2000.0,
+                "candle_time": "08-Sep-2026 13:15",
+                "last_order_id": "ORD_ENTRY_42",
+                "runner_active": True,
+                "peak_price": 2060.0,  # +3.0% target
+            }
+        })
+        mock_cli42 = MagicMock()
+        mock_cli42.placeorder.return_value = {"status": "success", "orderid": "EXIT_RUNNER_42", "mode": "analyze"}
+        mock_cli42.orderstatus.return_value = {"status": "success", "data": {"average_price": 2050.0}}
+        engine42.client = mock_cli42
+        engine42.verify_paper_mode = lambda: (True, "analyze")
+
+        # Candle tests guaranteed floor: entry 2000 * 1.005 = 2010.0 minimum trail SL
+        # High reaches 2065.0, low stays at 2059.0 > trail SL 2057.77 (position continues running)
+        df42 = make_test_df([
+            {"close": 2060.0, "high": 2065.0, "low": 2059.0, "open": 2060.0},
+        ])
+        exited42 = engine42.check_and_execute_target_or_sl("RELIANCE", contract_sym42, df42)
+        assert exited42 is False, "Runner should not exit when low is above trail SL"
+        tracked42 = engine42.state_manager.state.get("tracked_positions", {}).get(contract_sym42)
+        assert tracked42 is not None, "Tracked position missing"
+        assert tracked42["effective_trail_sl"] >= 2010.0, "Trailing stop dropped below guaranteed profit floor"
+        if tmp_state42.exists():
+            tmp_state42.unlink()
+        results.append((42, "Trailing Runner clamps to guaranteed profit floor", True, "Trailing SL clamped above guaranteed profit floor (2010.0) and high-water-mark tracked"))
+    except Exception as e:
+        results.append((42, "Trailing Runner clamps to guaranteed profit floor", False, str(e)))
 
     # Summary Report
     all_passed = True

@@ -104,12 +104,13 @@ class ExperimentLeaderboard:
             return pd.DataFrame(columns=FIELDNAMES)
         return pd.read_csv(self.csv_path)
 
-    def get_top_champions(self, top_n: int = 5) -> pd.DataFrame:
+    def get_top_champions(self, top_n: int = 10) -> pd.DataFrame:
         df = self.get_dataframe()
         if df.empty:
             return df
-        # Filter accepted/champion and sort by OOS Profit Factor descending
-        accepted = df[df["status"].isin(["ACCEPTED", "CHAMPION"])]
+        # Filter accepted/champion and deduplicate by hypothesis_name taking the latest row
+        accepted = df[df["status"].isin(["ACCEPTED", "CHAMPION"])].copy()
         if accepted.empty:
-            accepted = df
-        return accepted.sort_values("oos_pf", ascending=False).head(top_n)
+            accepted = df.copy()
+        latest = accepted.drop_duplicates(subset=["hypothesis_name"], keep="last")
+        return latest.sort_values("oos_pf", ascending=False).head(top_n)

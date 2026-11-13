@@ -26,7 +26,7 @@ fi
 if [ -d "$APP_DIR" ]; then
     find "$APP_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     find "$APP_DIR" -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-    find "$APP_DIR" -type f \( -name "*.pyc" -o -name "*.pyo" -o -name "*.pyd" -o -name "core.*" \) -delete 2>/dev/null || true
+    find "$APP_DIR" -type f \( -name "*.pyc" -o -name "*.pyo" -o -name "*.pyd" -o -name "core.[0-9]*" \) -delete 2>/dev/null || true
     find /tmp -type f -atime +2 -delete 2>/dev/null || true
 fi
 

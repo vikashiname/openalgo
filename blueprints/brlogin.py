@@ -1068,6 +1068,21 @@ def broker_callback(broker, para=None):
         elif broker == "paytm":
             # Paytm has feed_token (public_access_token) but no user_id
             return handle_auth_success(auth_token, session["user"], broker, feed_token=feed_token)
+        elif broker == "fyers":
+            fyers_refresh = None
+            if (
+                isinstance(error_message, dict)
+                and "data" in error_message
+                and isinstance(error_message["data"], dict)
+            ):
+                fyers_refresh = error_message["data"].get("refresh_token")
+            return handle_auth_success(
+                auth_token,
+                session["user"],
+                broker,
+                feed_token=feed_token,
+                refresh_token=fyers_refresh,
+            )
         else:
             # Pass just the feed token to handle_auth_success (other brokers don't have feed_token or user_id)
             return handle_auth_success(auth_token, session["user"], broker, feed_token=feed_token)

@@ -74,18 +74,30 @@ def run_single_symbol_backtest(
     macd_slow: int = 26,
     macd_sig: int = 9,
     direction_mode: str = "SYMMETRICAL",  # 'SYMMETRICAL', 'LONG_ONLY', 'SHORT_ONLY', 'ASYMMETRIC'
-    exit_type: str = "REVERSAL",          # 'REVERSAL', 'TARGET_SL', 'EMA26_EXIT', 'ATR_TRAILING'
+    exit_type: str = "REVERSAL",          # 'REVERSAL', 'TARGET_SL', 'TARGET_RUNNER', 'EARLY_TP_RUNNER', 'EMA26_EXIT', 'ATR_TRAILING'
     long_tp_pct: float = 3.0,
     short_tp_pct: float = 1.5,
     sl_pct: float = 6.0,
     atr_mult: float = 2.0,
     friction: float = 0.07,              # 0.07% round-trip
+    enable_runner: bool = False,
+    runner_trail_pct: float = 0.35,
+    runner_profit_floor_pct: float = 0.50,
+    early_long_tp_pct: float = 0.0,
+    early_short_tp_pct: float = 0.0,
+    move_sl_to_be: bool = False,
     htf_bias_series: Optional[pd.Series] = None,
 ) -> List[Dict[str, Any]]:
     """Runs high-speed chronological simulation on one instrument."""
     n = len(df)
     if n < 40:
         return []
+
+    # Infer runner and early TP activation from exit_type if not explicitly set
+    if exit_type in ["TARGET_RUNNER", "EARLY_TP_RUNNER"]:
+        enable_runner = True
+    if exit_type == "EARLY_TP_RUNNER":
+        move_sl_to_be = True
 
     # Filter by Asymmetric Universe
     allow_long_entry = True
@@ -145,6 +157,9 @@ def run_single_symbol_backtest(
     entry_idx = 0
     highest_px = 0.0
     lowest_px = 0.0
+    current_sl = 0.0
+    runner_active = False
+    early_tp_hit = False
     trades = []
     active_pending = None
 
@@ -167,56 +182,165 @@ def run_single_symbol_backtest(
         # 1. RISK EXIT CHECK (if in active position)
         exited_this_bar = False
         if pos != 0:
-            highest_px = max(highest_px, curr_h)
-            lowest_px = min(lowest_px, curr_l)
+            if pos == 1:
+                highest_px = max(highest_px, curr_h)
+            else:
+                lowest_px = min(lowest_px, curr_l)
 
-            if exit_type == "TARGET_SL":
+            if exit_type in ["TARGET_SL", "TARGET_RUNNER", "EARLY_TP_RUNNER"]:
                 if pos == 1:
-                    tp = entry_px * (1.0 + long_tp_pct / 100.0)
-                    sl = entry_px * (1.0 - sl_pct / 100.0)
-                    if curr_l <= sl:
-                        x_px = curr_o if curr_o <= sl else sl
+                    # Priority 1: Stop-Loss Check
+                    if curr_l <= current_sl:
+                        x_px = curr_o if curr_o <= current_sl else current_sl
                         raw_pnl = ((x_px - entry_px) / entry_px) * 100.0
+                        exit_reason = "BE_SL" if current_sl >= entry_px else "SL"
                         trades.append({
                             "symbol": symbol, "direction": "LONG", "entry_time": entry_time,
                             "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
-                            "bars_held": i - entry_idx + 1, "exit_reason": "SL"
+                            "bars_held": i - entry_idx + 1, "exit_reason": exit_reason
                         })
                         pos = 0
                         exited_this_bar = True
-                    elif curr_h >= tp:
-                        x_px = curr_o if curr_o >= tp else tp
-                        raw_pnl = ((x_px - entry_px) / entry_px) * 100.0
-                        trades.append({
-                            "symbol": symbol, "direction": "LONG", "entry_time": entry_time,
-                            "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
-                            "bars_held": i - entry_idx + 1, "exit_reason": "TP"
-                        })
-                        pos = 0
-                        exited_this_bar = True
+
+                    # Priority 2: Early Profit Milestone
+                    if not exited_this_bar and early_long_tp_pct > 0 and not early_tp_hit:
+                        early_level = entry_px * (1.0 + early_long_tp_pct / 100.0)
+                        if curr_h >= early_level:
+                            early_tp_hit = True
+                            if move_sl_to_be:
+                                current_sl = max(current_sl, entry_px)
+
+                    # Priority 3: Main Profit Target & Runner
+                    if not exited_this_bar:
+                        target_level = entry_px * (1.0 + long_tp_pct / 100.0)
+                        if not runner_active:
+                            if curr_h >= target_level:
+                                if not enable_runner:
+                                    x_px = curr_o if curr_o >= target_level else target_level
+                                    raw_pnl = ((x_px - entry_px) / entry_px) * 100.0
+                                    trades.append({
+                                        "symbol": symbol, "direction": "LONG", "entry_time": entry_time,
+                                        "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                        "bars_held": i - entry_idx + 1, "exit_reason": "TP"
+                                    })
+                                    pos = 0
+                                    exited_this_bar = True
+                                else:
+                                    runner_active = True
+                                    highest_px = max(highest_px, curr_h)
+                                    eff_trail = highest_px * (1.0 - runner_trail_pct / 100.0)
+                                    if runner_profit_floor_pct > 0:
+                                        floor_px = entry_px * (1.0 + runner_profit_floor_pct / 100.0)
+                                        eff_trail = max(eff_trail, floor_px)
+                                    if move_sl_to_be:
+                                        eff_trail = max(eff_trail, entry_px)
+                                    if curr_l <= eff_trail:
+                                        x_px = curr_o if curr_o <= eff_trail else eff_trail
+                                        raw_pnl = ((x_px - entry_px) / entry_px) * 100.0
+                                        trades.append({
+                                            "symbol": symbol, "direction": "LONG", "entry_time": entry_time,
+                                            "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                            "bars_held": i - entry_idx + 1, "exit_reason": "RUNNER_TRAIL"
+                                        })
+                                        pos = 0
+                                        exited_this_bar = True
+                        else:
+                            # Runner active from prior bar
+                            highest_px = max(highest_px, curr_h)
+                            eff_trail = highest_px * (1.0 - runner_trail_pct / 100.0)
+                            if runner_profit_floor_pct > 0:
+                                floor_px = entry_px * (1.0 + runner_profit_floor_pct / 100.0)
+                                eff_trail = max(eff_trail, floor_px)
+                            if move_sl_to_be:
+                                eff_trail = max(eff_trail, entry_px)
+                            eff_trail = max(eff_trail, current_sl)
+                            if curr_l <= eff_trail:
+                                x_px = curr_o if curr_o <= eff_trail else eff_trail
+                                raw_pnl = ((x_px - entry_px) / entry_px) * 100.0
+                                trades.append({
+                                    "symbol": symbol, "direction": "LONG", "entry_time": entry_time,
+                                    "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                    "bars_held": i - entry_idx + 1, "exit_reason": "RUNNER_TRAIL"
+                                })
+                                pos = 0
+                                exited_this_bar = True
+
                 else:  # SHORT
-                    tp = entry_px * (1.0 - short_tp_pct / 100.0)
-                    sl = entry_px * (1.0 + sl_pct / 100.0)
-                    if curr_h >= sl:
-                        x_px = curr_o if curr_o >= sl else sl
+                    # Priority 1: Stop-Loss Check
+                    if curr_h >= current_sl:
+                        x_px = curr_o if curr_o >= current_sl else current_sl
                         raw_pnl = ((entry_px - x_px) / entry_px) * 100.0
+                        exit_reason = "BE_SL" if current_sl <= entry_px else "SL"
                         trades.append({
                             "symbol": symbol, "direction": "SHORT", "entry_time": entry_time,
                             "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
-                            "bars_held": i - entry_idx + 1, "exit_reason": "SL"
+                            "bars_held": i - entry_idx + 1, "exit_reason": exit_reason
                         })
                         pos = 0
                         exited_this_bar = True
-                    elif curr_l <= tp:
-                        x_px = curr_o if curr_o <= tp else tp
-                        raw_pnl = ((entry_px - x_px) / entry_px) * 100.0
-                        trades.append({
-                            "symbol": symbol, "direction": "SHORT", "entry_time": entry_time,
-                            "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
-                            "bars_held": i - entry_idx + 1, "exit_reason": "TP"
-                        })
-                        pos = 0
-                        exited_this_bar = True
+
+                    # Priority 2: Early Profit Milestone
+                    if not exited_this_bar and early_short_tp_pct > 0 and not early_tp_hit:
+                        early_level = entry_px * (1.0 - early_short_tp_pct / 100.0)
+                        if curr_l <= early_level:
+                            early_tp_hit = True
+                            if move_sl_to_be:
+                                current_sl = min(current_sl, entry_px)
+
+                    # Priority 3: Main Profit Target & Runner
+                    if not exited_this_bar:
+                        target_level = entry_px * (1.0 - short_tp_pct / 100.0)
+                        if not runner_active:
+                            if curr_l <= target_level:
+                                if not enable_runner:
+                                    x_px = curr_o if curr_o <= target_level else target_level
+                                    raw_pnl = ((entry_px - x_px) / entry_px) * 100.0
+                                    trades.append({
+                                        "symbol": symbol, "direction": "SHORT", "entry_time": entry_time,
+                                        "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                        "bars_held": i - entry_idx + 1, "exit_reason": "TP"
+                                    })
+                                    pos = 0
+                                    exited_this_bar = True
+                                else:
+                                    runner_active = True
+                                    lowest_px = min(lowest_px, curr_l)
+                                    eff_trail = lowest_px * (1.0 + runner_trail_pct / 100.0)
+                                    if runner_profit_floor_pct > 0:
+                                        floor_px = entry_px * (1.0 - runner_profit_floor_pct / 100.0)
+                                        eff_trail = min(eff_trail, floor_px)
+                                    if move_sl_to_be:
+                                        eff_trail = min(eff_trail, entry_px)
+                                    if curr_h >= eff_trail:
+                                        x_px = curr_o if curr_o >= eff_trail else eff_trail
+                                        raw_pnl = ((entry_px - x_px) / entry_px) * 100.0
+                                        trades.append({
+                                            "symbol": symbol, "direction": "SHORT", "entry_time": entry_time,
+                                            "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                            "bars_held": i - entry_idx + 1, "exit_reason": "RUNNER_TRAIL"
+                                        })
+                                        pos = 0
+                                        exited_this_bar = True
+                        else:
+                            # Runner active from prior bar
+                            lowest_px = min(lowest_px, curr_l)
+                            eff_trail = lowest_px * (1.0 + runner_trail_pct / 100.0)
+                            if runner_profit_floor_pct > 0:
+                                floor_px = entry_px * (1.0 - runner_profit_floor_pct / 100.0)
+                                eff_trail = min(eff_trail, floor_px)
+                            if move_sl_to_be:
+                                eff_trail = min(eff_trail, entry_px)
+                            eff_trail = min(eff_trail, current_sl)
+                            if curr_h >= eff_trail:
+                                x_px = curr_o if curr_o >= eff_trail else eff_trail
+                                raw_pnl = ((entry_px - x_px) / entry_px) * 100.0
+                                trades.append({
+                                    "symbol": symbol, "direction": "SHORT", "entry_time": entry_time,
+                                    "exit_time": times[i], "net_pnl_pct": raw_pnl - friction,
+                                    "bars_held": i - entry_idx + 1, "exit_reason": "RUNNER_TRAIL"
+                                })
+                                pos = 0
+                                exited_this_bar = True
 
             elif exit_type == "EMA26_EXIT":
                 if pos == 1 and curr_c < curr_es:
@@ -334,6 +458,9 @@ def run_single_symbol_backtest(
                     entry_idx = i + 1
                     highest_px = nxt_open
                     lowest_px = nxt_open
+                    runner_active = False
+                    early_tp_hit = False
+                    current_sl = entry_px * (1.0 - sl_pct / 100.0)
                 elif sig == "SELL" and allow_short_entry:
                     pos = -1
                     entry_px = nxt_open
@@ -341,6 +468,9 @@ def run_single_symbol_backtest(
                     entry_idx = i + 1
                     highest_px = nxt_open
                     lowest_px = nxt_open
+                    runner_active = False
+                    early_tp_hit = False
+                    current_sl = entry_px * (1.0 + sl_pct / 100.0)
 
             # Case B: Currently in LONG position
             elif pos == 1 and sig == "SELL":
@@ -363,6 +493,9 @@ def run_single_symbol_backtest(
                     entry_idx = i + 1
                     highest_px = nxt_open
                     lowest_px = nxt_open
+                    runner_active = False
+                    early_tp_hit = False
+                    current_sl = entry_px * (1.0 + sl_pct / 100.0)
                 else:
                     pos = 0
 
@@ -387,6 +520,9 @@ def run_single_symbol_backtest(
                     entry_idx = i + 1
                     highest_px = nxt_open
                     lowest_px = nxt_open
+                    runner_active = False
+                    early_tp_hit = False
+                    current_sl = entry_px * (1.0 - sl_pct / 100.0)
                 else:
                     pos = 0
 
@@ -407,6 +543,12 @@ def run_portfolio_backtest(
     sl_pct: float = 6.0,
     atr_mult: float = 2.0,
     friction: float = 0.07,
+    enable_runner: bool = False,
+    runner_trail_pct: float = 0.35,
+    runner_profit_floor_pct: float = 0.50,
+    early_long_tp_pct: float = 0.0,
+    early_short_tp_pct: float = 0.0,
+    move_sl_to_be: bool = False,
     htf_bias_map: Optional[Dict[str, pd.Series]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """Executes backtest across the entire portfolio dataset."""
@@ -420,6 +562,12 @@ def run_portfolio_backtest(
             direction_mode=direction_mode, exit_type=exit_type,
             long_tp_pct=long_tp_pct, short_tp_pct=short_tp_pct, sl_pct=sl_pct,
             atr_mult=atr_mult, friction=friction,
+            enable_runner=enable_runner,
+            runner_trail_pct=runner_trail_pct,
+            runner_profit_floor_pct=runner_profit_floor_pct,
+            early_long_tp_pct=early_long_tp_pct,
+            early_short_tp_pct=early_short_tp_pct,
+            move_sl_to_be=move_sl_to_be,
             htf_bias_series=htf_bias,
         )
         all_trades.extend(sym_trades)

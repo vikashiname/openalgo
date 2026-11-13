@@ -2,9 +2,23 @@
 # Entry point wrapper for the optimized Ichimoku TK Crossover backtest strategy
 # Implements experienced trader filters to reduce sideways whipsaws.
 
-from ichimoku_tk_crossover import IchimokuTKBacktester
+import os
+import sys
+from pathlib import Path
+
+# Resolve archived strategy directory for legacy Ichimoku backtester
+_archive_strategy_dir = Path(__file__).resolve().parent.parent / "archive" / "strategy"
+if _archive_strategy_dir.exists() and str(_archive_strategy_dir) not in sys.path:
+    sys.path.insert(0, str(_archive_strategy_dir))
+
+try:
+    from ichimoku_tk_crossover import IchimokuTKBacktester
+except ImportError:
+    IchimokuTKBacktester = None
 
 if __name__ == "__main__":
+    if IchimokuTKBacktester is None:
+        sys.exit("❌ Error: Could not load IchimokuTKBacktester from archive/strategy/ichimoku_tk_crossover.py")
     print("🚀 Running optimized Ichimoku TK Crossover Backtest (1-Year)...")
     
     # Instantiate the backtester with the recommended high-grade MCX / Positional settings

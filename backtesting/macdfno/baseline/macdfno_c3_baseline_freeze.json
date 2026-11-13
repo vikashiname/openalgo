@@ -1,0 +1,117 @@
+{
+  "version_identifier": "MACD_FNO_V1_C3",
+  "baseline_name": "MACD_FNO_V1_C3",
+  "source_reference": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/macdfno_c3_forward.py",
+  "source_sha256": "147801202da7a4ac7b493d76e7754a9fa280ece0cfb5f14083e2da2f2e72d878",
+  "frozen_baseline_timestamp": "2026-10-15T12:00:00+05:30",
+  "rollback_reference": {
+    "baseline_version": "Variant A (MACD_FNO_V1 / Candidate G)",
+    "baseline_freeze_file": "backtesting/reports/macdfno_baseline_freeze.json",
+    "prior_live_sha256": "9de3972953a008f5ca7699517956e32f1f463d51481fd6a1ad7cd76289814f53",
+    "prior_backtesting_sha256": "f1aa42ce4f8bf45b6b898f3be9b1ca6417e05ccbd286eb28938303fb305c7d3b"
+  },
+  "approved_strategy_change": {
+    "summary": "Realign time-filter to allow evaluation of completed 10:15-11:15 IST candle at 11:15 IST while preserving 14:00-14:59 IST dead zone",
+    "old_time_filter_logic": "(9*60+45) <= m <= (10*60+55) [MORNING], (12*60) <= m <= (13*60+15) [MIDDAY], (15*60) <= m <= (15*60+20) [CLOSING], (11*60) <= m < (12*60) [DEAD_ZONE_11_AM - BLOCKS 11:15], (14*60) <= m < (15*60) [DEAD_ZONE_14_PM - BLOCKS 14:15]",
+    "new_time_filter_logic": "(9*60+45) <= m <= (13*60+15) [MORNING_AND_MIDDAY_WINDOW - PERMITS 11:15], (15*60) <= m <= (15*60+20) [CLOSING_WINDOW], (14*60) <= m < (15*60) [DEAD_ZONE_14_PM - BLOCKS 14:15]"
+  },
+  "strategy_parameters": {
+    "timeframe": "1-Hour (1H) completed candles only",
+    "macd": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9,
+      "histogram_expansion_bars": 2
+    },
+    "universe": {
+      "type": "Asymmetric Candidate G/E Whitelist",
+      "top_longs": [
+        "BAJAJ-AUTO",
+        "BAJFINANCE",
+        "BPCL",
+        "NTPC",
+        "SUNPHARMA",
+        "TATASTEEL",
+        "WIPRO"
+      ],
+      "top_shorts": [
+        "BAJAJ-AUTO",
+        "BPCL",
+        "M&M",
+        "NIFTY",
+        "NTPC",
+        "SUNPHARMA"
+      ],
+      "total_long_symbols": 7,
+      "total_short_symbols": 6
+    },
+    "risk_rules": {
+      "position_sizing": "1 lot per instrument",
+      "max_active_positions": 20,
+      "long_profit_target_pct": 3.0,
+      "short_profit_target_pct": 1.5,
+      "catastrophe_stop_loss_pct": -3.5,
+      "exit_model": "Profit Target, Catastrophe SL, or Opposite MACD Cross Reversal"
+    },
+    "friction_assumption": "0.07% round-trip per trade"
+  },
+  "historical_dataset": {
+    "source": "Yahoo Finance / OpenAlgo Local Parquet Store (Adjusted Underlying)",
+    "date_range": "2023-01-01 to 2026-09-09",
+    "trading_days": 732,
+    "timeframe": "1H completed candles"
+  },
+  "performance_metrics": {
+    "variant_a_baseline": {
+      "total_trades": 981,
+      "win_rate_pct": 55.86,
+      "net_pnl_pct": 70.84,
+      "profit_factor": 1.071,
+      "expectancy_pct": 0.0722,
+      "trade_max_dd_pct": 48.3,
+      "portfolio_compounded_return_pct": 2.84,
+      "portfolio_max_dd_pct": 2.14,
+      "annualized_sharpe": 0.51,
+      "max_concurrent_positions": 8,
+      "holdout_2026_trades": 247,
+      "holdout_2026_net_pnl_pct": 17.66,
+      "holdout_2026_profit_factor": 1.072
+    },
+    "variant_c3_new_baseline": {
+      "total_trades": 1243,
+      "win_rate_pct": 53.42,
+      "net_pnl_pct": 97.04,
+      "profit_factor": 1.082,
+      "expectancy_pct": 0.0781,
+      "trade_max_dd_pct": 47.39,
+      "portfolio_compounded_return_pct": 3.99,
+      "portfolio_max_dd_pct": 1.96,
+      "annualized_sharpe": 0.66,
+      "max_concurrent_positions": 8,
+      "holdout_2026_trades": 309,
+      "holdout_2026_net_pnl_pct": 4.03,
+      "holdout_2026_profit_factor": 1.013
+    }
+  },
+  "statistical_evaluation_and_caveats": {
+    "statistical_superiority_established": false,
+    "welch_t_stat": 0.059,
+    "welch_p_value": 0.953,
+    "permutation_p_value": 0.4782,
+    "bootstrap_pf_a_95_ci": [
+      0.928,
+      1.235
+    ],
+    "bootstrap_pf_c3_95_ci": [
+      0.956,
+      1.231
+    ],
+    "expectancy_difference_interpretation": "Observed trade expectancy delta (+0.0059%) is descriptive and statistically indistinguishable from zero (p=0.953 > 0.05). Edge improvement is primarily driven by volume expansion (+26.7% trades) with positive expectancy.",
+    "known_limitations": [
+      "Weaker 2026 holdout performance (PF 1.013 vs 1.072 in baseline; Net P&L +4.03% vs +17.66%).",
+      "Mid-morning whipsaw sensitivity on rangebound consolidation periods (e.g. BPCL Q1 2026).",
+      "Historical data relies on continuous cash underlying adjusted data rather than live NFO contract ticks."
+    ]
+  },
+  "reproducible_validation_command": "python3 backtesting/experiments/exp_20261015_macd_time_filter_audit/run_c3_final_validation.py"
+}

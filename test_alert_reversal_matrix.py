@@ -299,6 +299,7 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
                 action="SELL",
                 quantity=700,
                 candle_time="2026-10-08T14:15:00+05:30",
+                reference_price=695.0,
             )
             # Position must now be completely removed / FLAT
             self.assertNotIn("HINDALCO27OCT26FUT", engine.state_manager.state.get("tracked_positions", {}))
@@ -347,6 +348,7 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
                 action="BUY",
                 quantity=1000,
                 candle_time="2026-10-08T14:15:00+05:30",
+                reference_price=590.0,
             )
             self.assertNotIn("AUBANK27OCT26FUT", engine.state_manager.state.get("tracked_positions", {}))
 
@@ -373,7 +375,8 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
             {"open": 320.0, "high": 321.0, "low": 312.0, "close": 312.85}
         ], index=[pd.Timestamp("2026-10-08 09:15:00+0530")])
 
-        with patch.object(engine, "place_paper_order", return_value={"status": "success", "orderid": "ORD_TGT_8"}) as mock_place, \
+        with patch.object(engine, "get_open_position", return_value=-3000), \
+             patch.object(engine, "place_paper_order", return_value={"status": "success", "orderid": "ORD_TGT_8"}) as mock_place, \
              patch.object(engine, "get_order_fill_price", return_value=312.85):
 
             res = engine.check_and_execute_target_or_sl("NTPC", "NTPC27OCT26FUT", df_candle)
@@ -400,7 +403,8 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
             {"open": 2990.0, "high": 3005.0, "low": 2800.0, "close": 2810.0}
         ], index=[pd.Timestamp("2026-10-08 09:15:00+0530")])
 
-        with patch.object(engine, "place_paper_order", return_value={"status": "success", "orderid": "ORD_SL_9"}) as mock_place, \
+        with patch.object(engine, "get_open_position", return_value=250), \
+             patch.object(engine, "place_paper_order", return_value={"status": "success", "orderid": "ORD_SL_9"}) as mock_place, \
              patch.object(engine, "get_order_fill_price", return_value=2810.0):
 
             res = engine.check_and_execute_target_or_sl("RELIANCE", "RELIANCE27OCT26FUT", df_candle)
@@ -450,6 +454,37 @@ class TestPositionTransitionsAndAlerts(unittest.TestCase):
             self.assertIn("PAPER TRADE — 🔄 SIGNAL EXIT", self.dispatched_alerts[0])
             self.assertIn("Net P&L:</b> +₹15,000.00 (+1.61%)", self.dispatched_alerts[0])
 
+    def test_case_13_reverse_order_blocked_when_broker_is_flat(self):
+        """Case 13: Reverse exit order is BLOCKED when broker position is already FLAT (Manual UI Exit)"""
+        engine = EMACrossPaperTradingEngine(symbols=["RELIANCE"])
+        engine.state_manager.state = engine.state_manager._default_state()
+        engine.state_manager.state["tracked_positions"]["RELIANCE27OCT26FUT"] = {
+            "contract": "RELIANCE27OCT26FUT",
+            "base_symbol": "RELIANCE",
+            "direction": "LONG",
+            "quantity": 250,
+            "average_price": 3000.0,
+        }
+        engine.contract_cache["RELIANCE"] = {"contract": "RELIANCE27OCT26FUT", "lot_size": 250}
+
+        # 6% adverse move trigger
+        df_candle = pd.DataFrame([
+            {"open": 2990.0, "high": 3005.0, "low": 2800.0, "close": 2810.0}
+        ], index=[pd.Timestamp("2026-10-08 09:15:00+0530")])
+
+        # Broker is already FLAT (0) due to prior UI manual square-off
+        with patch.object(engine, "get_open_position", return_value=0), \
+             patch.object(engine, "place_paper_order") as mock_place:
+
+            res = engine.check_and_execute_target_or_sl("RELIANCE", "RELIANCE27OCT26FUT", df_candle)
+            # Must return True (handled safely)
+            self.assertTrue(res)
+            # ZERO orders sent to broker/paper engine (reverse order BLOCKED!)
+            mock_place.assert_not_called()
+            # Local state MUST be synchronized to FLAT
+            self.assertNotIn("RELIANCE27OCT26FUT", engine.state_manager.state.get("tracked_positions", {}))
+
 
 if __name__ == "__main__":
     unittest.main()
+

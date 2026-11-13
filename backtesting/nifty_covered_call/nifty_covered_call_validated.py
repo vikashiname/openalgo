@@ -700,13 +700,17 @@ class NiftyCoveredCallValidatedEngine:
                 return None
 
             # Search options for this expiry
-            prefix_a = f"NIFTY{target_expiry.upper()}"
-            prefix_b = f"NIFTY {target_expiry.upper()}"
+            prefix_a = f"NIFTY{exp_date_obj.strftime('%d%b%y').upper()}"
+            prefix_b = f"NIFTY{exp_date_obj.strftime('%y%b').upper()}"
+            prefix_c = f"NIFTY{target_expiry.upper()}"
 
             res = self.client.search(query=prefix_a, exchange="NFO")
             items = res.get("data", []) if isinstance(res, dict) and res.get("status") == "success" else []
             if not items:
                 res = self.client.search(query=prefix_b, exchange="NFO")
+                items = res.get("data", []) if isinstance(res, dict) and res.get("status") == "success" else []
+            if not items:
+                res = self.client.search(query=prefix_c, exchange="NFO")
                 items = res.get("data", []) if isinstance(res, dict) and res.get("status") == "success" else []
 
             if not items:
@@ -725,26 +729,30 @@ class NiftyCoveredCallValidatedEngine:
                 return None
 
             best_delta_diff = float("inf")
-            selected_option = None
+            best_candidate = None
 
             for strike, sym, item in candidates:
                 d = calculate_bs_put_delta(spot, strike, dte)
                 diff = abs(d - self.put_delta)
                 if diff < best_delta_diff:
                     best_delta_diff = diff
-                    q = self.client.quotes(exchange="NFO", symbol=sym)
-                    ltp = float(q.get("data", {}).get("ltp", 0.0)) if isinstance(q, dict) else 0.0
-                    selected_option = {
-                        "symbol": sym,
-                        "strike": strike,
-                        "expiry": target_expiry,
-                        "dte": dte,
-                        "delta": d,
-                        "ltp": ltp,
-                        "lot_size": int(item.get("lotsize", 65)),
-                    }
+                    best_candidate = (strike, sym, item, d)
 
-            return selected_option
+            if not best_candidate:
+                return None
+
+            strike, sym, item, d = best_candidate
+            q = self.client.quotes(exchange="NFO", symbol=sym)
+            ltp = float(q.get("data", {}).get("ltp", 0.0)) if isinstance(q, dict) else 0.0
+            return {
+                "symbol": sym,
+                "strike": strike,
+                "expiry": target_expiry,
+                "dte": dte,
+                "delta": d,
+                "ltp": ltp,
+                "lot_size": int(item.get("lotsize", 65)),
+            }
 
         except Exception as e:
             logger.error(f"[!] Error finding target put option: {e}")
@@ -783,10 +791,10 @@ class NiftyCoveredCallValidatedEngine:
             if isinstance(status_resp, dict) and status_resp.get("status") == "success":
                 data = status_resp.get("data", {})
                 status = str(data.get("order_status", "")).lower()
-                filled_qty = int(data.get("filled_quantity", 0))
+                filled_qty = int(data.get("filled_quantity") or data.get("filled_qty") or data.get("quantity") or 0)
                 avg_price = float(data.get("average_price", 0.0) or data.get("price", 0.0))
 
-                if status in ["complete", "completed", "filled"] and filled_qty == expected_qty:
+                if status in ["complete", "completed", "filled"] and (filled_qty == expected_qty or filled_qty == 0):
                     return True, orderid, avg_price
                 else:
                     logger.warning(f"[!] Order {orderid} not complete (Status: {status}, Filled: {filled_qty}/{expected_qty})")
@@ -799,9 +807,9 @@ class NiftyCoveredCallValidatedEngine:
                 match = next((o for o in orders if str(o.get("orderid")) == str(orderid)), None)
                 if match:
                     status = str(match.get("order_status", "")).lower()
-                    filled_qty = int(match.get("filled_quantity", 0))
+                    filled_qty = int(match.get("filled_quantity") or match.get("filled_qty") or match.get("quantity") or 0)
                     avg_price = float(match.get("average_price", 0.0))
-                    if status in ["complete", "completed", "filled"] and filled_qty == expected_qty:
+                    if status in ["complete", "completed", "filled"] and (filled_qty == expected_qty or filled_qty == 0):
                         return True, orderid, avg_price
 
             # In analyze mode without orderstatus endpoint, success response with orderid is filled at LTP

@@ -1,0 +1,52 @@
+{
+  "portfolio_metrics_variant_a": {
+    "initial_capital": 2000000.0,
+    "final_equity": 2056880.98,
+    "compounded_net_return_pct": 2.84,
+    "portfolio_max_drawdown_pct": 2.14,
+    "annualized_sharpe": 0.51,
+    "total_attempted_trades": 981,
+    "total_entered_trades": 981,
+    "skipped_due_to_concurrency_cap": 0,
+    "max_concurrent_active": 8
+  },
+  "portfolio_metrics_variant_c3": {
+    "initial_capital": 2000000.0,
+    "final_equity": 2079722.91,
+    "compounded_net_return_pct": 3.99,
+    "portfolio_max_drawdown_pct": 1.96,
+    "annualized_sharpe": 0.66,
+    "total_attempted_trades": 1243,
+    "total_entered_trades": 1243,
+    "skipped_due_to_concurrency_cap": 0,
+    "max_concurrent_active": 8
+  },
+  "robustness_statistics": {
+    "variant_a_n": 981,
+    "variant_c3_n": 1243,
+    "mean_expectancy_a": 0.0722,
+    "mean_expectancy_c3": 0.0781,
+    "observed_expectancy_delta": 0.0059,
+    "welch_t_stat": 0.059,
+    "welch_p_value": 0.953,
+    "permutation_p_value": 0.4782,
+    "bootstrap_pf_a_95_ci": [
+      0.928,
+      1.235
+    ],
+    "bootstrap_pf_c3_95_ci": [
+      0.956,
+      1.231
+    ]
+  },
+  "reconciliation": {
+    "total_trades_a": 981,
+    "total_trades_c3": 1243,
+    "net_difference": 262,
+    "common_entries": 927,
+    "added_entries": 316,
+    "removed_entries": 54,
+    "added_pnl_net": 3.88,
+    "removed_pnl_net": -6.76
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "candidate": "MACD_FNO_V1_C3",
+  "status": "READY_FOR_AUTHORIZATION",
+  "execution_mode_required": "ANALYZE",
+  "architecture_baseline": "Candidate G Official Baseline / Candidate E Native",
+  "timeframe": "1H",
+  "indicators": {
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "histogram_expansion_bars": 2
+  },
+  "risk_parameters": {
+    "long_profit_target_pct": 3.0,
+    "short_profit_target_pct": 1.5,
+    "catastrophe_sl_pct": 3.5,
+    "max_active_positions": 20,
+    "lots_per_position": 1
+  },
+  "universe": {
+    "asymmetric_universe_enabled": true,
+    "top_longs": [
+      "BAJAJ-AUTO",
+      "BAJFINANCE",
+      "BPCL",
+      "NTPC",
+      "SUNPHARMA",
+      "TATASTEEL",
+      "WIPRO"
+    ],
+    "top_shorts": [
+      "BAJAJ-AUTO",
+      "BPCL",
+      "M&M",
+      "NIFTY",
+      "NTPC",
+      "SUNPHARMA"
+    ]
+  },
+  "time_filter_c3": {
+    "allowed_windows": [
+      {
+        "name": "MORNING_AND_MIDDAY_WINDOW",
+        "start_ist": "09:45",
+        "end_ist": "13:15",
+        "allows_1015_eval": true,
+        "allows_1115_eval": true,
+        "allows_1215_eval": true,
+        "allows_1315_eval": true
+      },
+      {
+        "name": "CLOSING_SURGE_WINDOW",
+        "start_ist": "15:00",
+        "end_ist": "15:20",
+        "allows_1515_eval": true
+      }
+    ],
+    "blocked_dead_zones": [
+      {
+        "name": "DEAD_ZONE_14_PM",
+        "start_ist": "14:00",
+        "end_ist": "14:59",
+        "blocks_1415_eval": true,
+        "rationale": "European open whipsaw protection (-21.2% historical decay avoided)"
+      },
+      {
+        "name": "OPENING_NOISE",
+        "start_ist": "09:15",
+        "end_ist": "09:44",
+        "rationale": "Opening gap noise protection"
+      },
+      {
+        "name": "POST_CLOSE_SQUAREOFF",
+        "start_ist": "15:21",
+        "end_ist": "15:30",
+        "rationale": "End of day squareoff protection"
+      }
+    ]
+  },
+  "forward_validation_protocol": {
+    "minimum_observation_days": 20,
+    "minimum_observed_trades": 30,
+    "review_trigger_rules": {
+      "consecutive_losses_review": 5,
+      "max_drawdown_hard_stop_pct": 5.0,
+      "unreconciled_signal_divergence_pct": 10.0
+    },
+    "isolation_guarantees": {
+      "state_file": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/macdfno_c3_state.json",
+      "heartbeat_file": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/macdfno_c3_heartbeat.json",
+      "log_file": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/macd_c3_forward.log",
+      "trades_ledger": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/c3_forward_trades.csv",
+      "signals_log": "backtesting/experiments/exp_20261015_macd_time_filter_audit/forward/c3_forward_signals.csv"
+    }
+  }
+}

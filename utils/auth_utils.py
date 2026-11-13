@@ -450,7 +450,9 @@ def _download_master_contract(broker):
     return master_contract_status
 
 
-def handle_auth_success(auth_token, user_session_key, broker, feed_token=None, user_id=None):
+def handle_auth_success(
+    auth_token, user_session_key, broker, feed_token=None, user_id=None, refresh_token=None
+):
     """
     Handles common tasks after successful authentication.
     - Sets session parameters
@@ -516,7 +518,12 @@ def handle_auth_success(auth_token, user_session_key, broker, feed_token=None, u
 
     # Store auth token in database
     inserted_id = upsert_auth(
-        user_session_key, auth_token, broker, feed_token=feed_token, user_id=user_id
+        user_session_key,
+        auth_token,
+        broker,
+        feed_token=feed_token,
+        user_id=user_id,
+        refresh_token=refresh_token,
     )
     if inserted_id:
         logger.info(f"Database record upserted with ID: {inserted_id}")

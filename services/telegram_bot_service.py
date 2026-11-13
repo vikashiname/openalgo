@@ -766,8 +766,17 @@ class TelegramBotService:
         if isinstance(error, telegram.error.NetworkError):
             logger.warning(f"Telegram NetworkError: {error}. Will retry automatically.")
         elif isinstance(error, telegram.error.Conflict):
-            logger.error("Another instance of the bot is running! Please stop other instances.")
+            logger.error(
+                "Another instance of the bot is running! Stopping local bot polling to avoid conflict."
+            )
             self.is_running = False
+            with self._lifecycle_lock:
+                if self._gen_stop:
+                    self._gen_stop.set()
+            try:
+                update_bot_config({"is_active": False})
+            except Exception:
+                pass
         elif isinstance(error, telegram.error.TimedOut):
             logger.warning("Request to Telegram timed out. Will retry automatically.")
         elif isinstance(error, telegram.error.BadRequest):

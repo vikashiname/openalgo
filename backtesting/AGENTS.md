@@ -1,5 +1,7 @@
 # AGY MASTER SOP — AUTO-APPROVE STRATEGY RESEARCH & GOVERNANCE
 
+> **Note:** This document is the primary research agent guide and is synchronized with [`AGY_MASTER_SOP.md`](file:///Users/mac/Desktop/openalgo/backtesting/AGY_MASTER_SOP.md).
+
 This is a PERMANENT governance rule for this research environment.
 
 It applies to:
@@ -98,6 +100,24 @@ Unless a strategy requires a justified alternative structure, use:
 ```
 
 All strategy-specific files must remain inside this directory.
+
+---
+
+# 3A. IDENTICAL DIGITAL-TWIN TESTING PATTERN & STATE ISOLATION RULE
+
+Following the proven **NIFTY Covered Call** governance pattern:
+
+1. **Parity Requirement:**
+   - Every live production strategy in `strategies/liveonopenalgo/<name>.py` must maintain an **identical digital-twin runner** inside its dedicated backtesting folder: `backtesting/<name>/<name>.py`.
+   - The digital-twin script in `backtesting/` must share identical logic, indicators, confirmation windows, risk exits (targets/catastrophe stops), order pacing delays, and database retry routines as live.
+
+2. **Mandatory State & Log Isolation (Zero Contamination):**
+   - The digital-twin script in `backtesting/` must strictly resolve its state file relative to its own folder (`SCRIPT_DIR / "<name>_state.json"` or via `--state-file`).
+   - Running tests, simulation harnesses, or forward-validations in `backtesting/` **must NEVER read, write, reset, or mutate** production state files in `strategies/liveonopenalgo/` (e.g. `macdfno_state.json`, `emacrossopen_state.json`).
+
+3. **Pre-Promotion Regression Assertion:**
+   - Before any strategy logic modification or parameter update is promoted from `backtesting/` to `strategies/liveonopenalgo/`, it must achieve a **100% pass rate** on its built-in assertion suite (e.g. `python3 <script> --test`).
+
 
 ---
 
@@ -233,6 +253,40 @@ The baseline must be:
 
 Compare against an appropriate benchmark.
 Do not optimize the baseline.
+
+---
+
+# 8A. CERTIFIED MOMENTUM & DUAL-CONFIRMATION BASELINE STANDARD (OCTOBER 2026 UPDATE)
+
+Following the empirical audit across 166,444 bars (33 F&O instruments, 2023–2026), the classical "unfiltered whole-universe" baseline has been proven mathematically invalid (yielding -59.63% Net P&L due to chop in mean-reverting underlyings).
+
+Effective immediately, the **New Approved Baseline** for dual-confirmation momentum strategies (specifically **`emacrossopen.py`** and related derivatives) is defined as:
+
+### 1. The Certified Baseline Architecture (`Candidate EXP_I`)
+* **Core Universe Restriction (`EXP_B` Edge):** Entries are strictly restricted to verified persistent trend leaders:
+  * `TOP_LONGS`: `SUNPHARMA`, `BAJAJ-AUTO`, `BPCL`, `WIPRO`, `TATASTEEL`, `BAJFINANCE`, `NTPC`
+  * `TOP_SHORTS`: `SUNPHARMA`, `BAJAJ-AUTO`, `M&M`, `BPCL`, `NTPC`, `NIFTY`
+  * *Uncurated symbols must not be entered.*
+* **1H Macro Trend Regime Guard:** 
+  * Long entries require bar `Close > EMA26`.
+  * Short entries require bar `Close < EMA26`.
+* **Lookahead-Free Conservative Trailing Runner:**
+  * Fixed Target Banking: +3.00% Long / +1.50% Short.
+  * Trailing Distance: 0.35% from High Water Mark (HWM).
+  * Lookahead-Free Accounting: Same-candle trail breach must never be ignored; runners are tracked on subsequent bars.
+  * Catastrophe Stop-Loss: -6.00% emergency stop.
+* **Empirical Baseline Benchmark Metrics:**
+  * **Net P&L:** +233.34% (380 trades)
+  * **Profit Factor:** 1.817 (In-Sample: 1.788 | Out-of-Sample: 1.860 | 2026 Holdout: 1.820)
+  * **Max Drawdown:** 16.78% (vs 175.3% on old raw basket)
+  * **Friction Resilience:** Remains robust up to 0.15% round-trip drag (Net +202.94%, PF 1.685).
+
+### 2. Strategy Target Confirmation
+* **Primary Target for Optimization & Digital-Twin Alignment:**  
+  * **Research Digital-Twin:** `backtesting/emacrossopen/emacrossopen.py`
+  * **Live Production Candidate (Post-Paper Simulation Approval):** `strategies/liveonopenalgo/emacrossopen.py`
+* **Rule for `macdfno.py`:**  
+  * `macdfno.py` is a single-indicator histogram momentum strategy and must NOT inherit dual-confirmation rules without its own independent Phase 3 baseline audit.
 
 ---
 
@@ -992,3 +1046,73 @@ No research strategy may enter:
 ```
 
 without explicit user approval.
+
+---
+
+# 27. LIVE STRATEGY EXECUTION & DEPLOYMENT ARCHITECTURE STANDARDS
+
+When preparing, modifying, or operating production trading strategies (e.g. `strategies/liveonopenalgo/` and `strategies/scripts/`):
+
+1. **Zero Blocking Calls in `place_order()`**
+   * Never perform synchronous/blocking network calls immediately before or during order submission.
+   * Do not call `/positionbook`, `/profile`, or similar pre-flight APIs in the critical order-dispatch path.
+   * Order dispatch must remain as fast and reliable as possible.
+   * Do not introduce pre-flight checks that can cause a valid trade signal to be lost because of transient API latency.
+
+2. **Mandatory Localhost Loopback on Production EC2**
+   * Strategies running on the production EC2 instance must communicate with OpenAlgo through:
+     `http://127.0.0.1:5000`
+   * Do not use:
+     `https://vikashiname.in`
+     for internal strategy → OpenAlgo communication.
+   * Objective: avoid unnecessary TLS, public DNS, NAT hairpinning and related latency/resource issues.
+
+3. **In-Memory TTL Mode/Environment Cache**
+   * Environment and execution-mode checks must use in-memory caching.
+   * Default TTL: **60 seconds**.
+   * Cache must have a resilient fallback.
+   * Do not perform a network request on every trade trigger.
+
+4. **Resilient Notification Transport**
+   * Telegram/WhatsApp notification transport must use connection pooling and retries.
+   * Use `httpx.HTTPTransport(retries=3)` where applicable.
+   * Automatically recreate the HTTP client when an idle connection fails or produces errors such as:
+     `UNEXPECTED_EOF_WHILE_READING`
+   * Notification failure must not block or prevent trade execution.
+
+5. **In-Place Live Strategy Deployment**
+   * For an already-running live strategy, update the existing file in place:
+     `/home/ubuntu/fyersawsog/strategies/scripts/<filename>.py`
+   * Restart the corresponding systemd service after the approved update.
+   * Do NOT re-upload an existing live strategy through the OpenAlgo web UI.
+   * Avoid creating duplicate timestamped strategy files.
+   * Preserve PID tracking, audit logs and persistent state continuity.
+
+---
+
+# 28. INSTITUTIONAL ALWAYS-IN-SYNC CLOSED-LOOP CONTINUOUS RECONCILIATION & REVERSE-ORDER BLOCK
+
+To eliminate phantom position tracking and completely block accidental reverse exit orders across all OpenAlgo strategies:
+
+1. **Closed-Loop In-Loop Positionbook Reconciliation**
+   * Strategies must continuously query the broker positionbook (`/api/v1/positionbook` or `/api/v1/openposition`) at each execution cycle or candle boundary.
+   * If a position recorded in local state is confirmed flat (`0` quantity) on the broker (e.g. manually closed by the user in the OpenAlgo UI or broker app):
+     * The strategy MUST immediately synchronize its local persistent state to **FLAT**.
+     * Log: `🔄 [EXTERNAL MANUAL EXIT DETECTED] Position for <SYMBOL> is FLAT on broker. Synchronizing local strategy state to FLAT (Reason: MANUAL_UI_EXIT)`.
+     * Record the exit trade in history and update realized PnL.
+     * Suppress and abort any automated exit orders for that position.
+
+2. **Reverse Exit Order Block (Pre-Exit Probe Guard)**
+   * Before dispatching an exit or exit-to-flat order (`SELL` to close LONG, or `BUY` to close SHORT):
+     * Verify whether the broker still holds an open position.
+     * If the broker position is already `0`, the exit order MUST be BLOCKED immediately.
+     * Log: `🛑 [REVERSE ORDER PREVENTED] Position for <SYMBOL> is already FLAT on broker! Aborting exit order to prevent unintended reverse position.`
+     * Prevent placing the order to avoid opening an unwanted opposite/reverse position.
+
+3. **Reversal Size Adaptation**
+   * On opposite entry signals (reversals), if the prior position is already flat on the broker, adjust order quantity to the base entry size rather than `abs(prior_pos) + base_size`.
+
+4. **Fail-Closed Safety on API Uncertainty**
+   * If broker positionbook queries fail or pending orders exist in the orderbook, automated orders must pause rather than executing unverified actions.
+
+
