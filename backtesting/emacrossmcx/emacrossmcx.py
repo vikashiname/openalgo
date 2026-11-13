@@ -77,7 +77,8 @@ import pandas as pd
 import requests
 
 # Add project root to sys.path
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = SCRIPT_DIR.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -85,21 +86,29 @@ try:
     from dotenv import load_dotenv, find_dotenv
     load_dotenv(find_dotenv(), override=False)
 except ImportError:
-    for candidate in [ROOT_DIR / ".env", Path.cwd() / ".env"]:
-        if candidate.exists():
-            try:
-                with open(candidate, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#") and "=" in line:
-                            k, v = line.split("=", 1)
-                            k = k.strip()
-                            v = v.strip().strip("'\"")
-                            if k and k not in os.environ:
-                                os.environ[k] = v
-                break
-            except Exception:
-                pass
+    pass
+
+for candidate in [
+    ROOT_DIR / ".env",
+    Path.cwd() / ".env",
+    Path("/opt/openalgo/.env"),
+    SCRIPT_DIR.parent / ".env",
+    SCRIPT_DIR / ".env",
+]:
+    if candidate.exists():
+        try:
+            with open(candidate, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and (k not in os.environ or os.environ[k] == "a93a6d4254acb477c693e0776b9c34ef4f129d0a94a4c1c100235186f8e1a41e"):
+                            os.environ[k] = v
+            break
+        except Exception:
+            pass
 
 try:
     from openalgo import api
@@ -245,7 +254,8 @@ MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
     "GOLDM": {
         "display_name": "Gold Mini (100g)",
         "search_prefix": "GOLDM",
-        "default_lot": 1,  # In broker contract count (1 lot = 100 grams, quoted per 10g)
+        "default_lot": 1,  # 1 lot per order (100 grams)
+        "trading_lot_size": 1,  # Strict 1-lot order enforcement
         "unit": "100g",
         "tick_size": 1.0,
         "point_value": 10.0,  # ₹10 per 1-point move per lot (10 units of 10g in 100g)
@@ -256,7 +266,8 @@ MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
     "SILVERMIC": {
         "display_name": "Silver Micro (1kg)",
         "search_prefix": "SILVERMIC",
-        "default_lot": 1,  # 1 kg contract, quoted per 1kg
+        "default_lot": 1,  # 1 lot per order (1kg)
+        "trading_lot_size": 1,  # Strict 1-lot order enforcement
         "unit": "1kg",
         "tick_size": 1.0,
         "point_value": 1.0,  # ₹1 per 1-point move per lot
@@ -267,7 +278,8 @@ MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
     "CRUDEOILM": {
         "display_name": "Crude Oil Mini (10 bbl)",
         "search_prefix": "CRUDEOILM",
-        "default_lot": 10,  # 10 barrels contract
+        "default_lot": 1,  # 1 lot per order (10 barrels)
+        "trading_lot_size": 1,  # Strict 1-lot order enforcement
         "unit": "10 Barrels",
         "tick_size": 1.0,
         "point_value": 10.0,  # ₹10 per 1-point move per lot (10 barrels)
@@ -280,7 +292,7 @@ MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
 FALLBACK_LOT_SIZES = {
     "GOLDM": 1,
     "SILVERMIC": 1,
-    "CRUDEOILM": 10,
+    "CRUDEOILM": 1,
 }
 
 # ==============================================================================
@@ -896,7 +908,7 @@ def resolve_mcx_contract(
     """
     clean_sym = normalize_mcx_symbol(symbol)
     spec = MCX_COMMODITY_SPECS.get(clean_sym, {})
-    fallback_lot = spec.get("default_lot", FALLBACK_LOT_SIZES.get(clean_sym, 1))
+    fallback_lot = spec.get("trading_lot_size", FALLBACK_LOT_SIZES.get(clean_sym, 1))
     fallback_day = spec.get("fallback_expiry_day", 20)
 
     try:
@@ -935,7 +947,9 @@ def resolve_mcx_contract(
                         except Exception:
                             pass
                     if exp_dt and exp_dt >= now:
-                        lot = int(item.get("lotsize", fallback_lot))
+                        # For MCX commodity futures on OpenAlgo/Fyers, 1 order quantity = 1 lot.
+                        # Enforce strict 1-lot trading per order contract.
+                        lot = int(spec.get("trading_lot_size", 1))
                         valid.append((exp_dt, item.get("symbol"), lot))
 
             if valid:
@@ -1512,7 +1526,7 @@ class MCXEMACrossStrategy:
                     "lot_size": lot_sz,
                     "expiry_dt": exp_dt,
                 }
-                logger.info(f"  ✅ {sym} -> Contract: {contract_sym} | Lot Size: {lot_sz} | Expiry: {exp_dt.strftime('%d-%b-%Y') if exp_dt else 'N/A'}")
+                logger.info(f"  ✅ {sym} -> Contract: {contract_sym} | Lot: {lot_sz} (1 lot) | Expiry: {exp_dt.strftime('%d-%b-%Y') if exp_dt else 'N/A'}")
             else:
                 logger.warning(f"  ⚠️ Could not resolve contract for {sym}.")
 
@@ -2761,7 +2775,7 @@ def run_automated_tests() -> bool:
         sym_crud, lot_crud, _ = resolve_mcx_contract("CRUDEM", "http://127.0.0.1:5000", "dummy")
         assert sym_gold.startswith("GOLDM") and lot_gold == 1
         assert sym_silv.startswith("SILVERMIC") and lot_silv == 1
-        assert sym_crud.startswith("CRUDEOILM") and lot_crud == 10
+        assert sym_crud.startswith("CRUDEOILM") and lot_crud == 1
         results.append((12, "MCX contract fallback resolution", True, f"GOLDM, SILVERMIC, CRUDEOILM resolved successfully"))
     except Exception as e:
         results.append((12, "MCX contract fallback resolution", False, str(e)))
@@ -2894,13 +2908,13 @@ def run_automated_tests() -> bool:
     # 18. Risk check: Catastrophe Stop-Loss
     try:
         mock_eng3 = MockMCXEngine(symbols=["CRUDEOILM"])
-        mock_eng3.contract_cache["CRUDEOILM"] = {"contract": "CRUDEOILM19NOV26FUT", "lot_size": 10}
+        mock_eng3.contract_cache["CRUDEOILM"] = {"contract": "CRUDEOILM19NOV26FUT", "lot_size": 1}
         mock_eng3.state_manager.update_tracked_positions({
             "CRUDEOILM19NOV26FUT": {
                 "symbol": "CRUDEOILM",
                 "contract": "CRUDEOILM19NOV26FUT",
                 "direction": "LONG",
-                "quantity": 10,
+                "quantity": 1,
                 "average_price": 6000.0,
                 "runner_active": False,
                 "early_target_hit": False,
