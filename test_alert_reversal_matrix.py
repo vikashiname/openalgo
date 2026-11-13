@@ -37,8 +37,25 @@ sys.modules["extensions"] = MagicMock()
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
-from subscribers.telegram_subscriber import _send_alert as subscriber_send_alert
+from events.base import OrderEvent
+from services.alerts.router import alert_for
 from services.telegram_alert_service import TelegramAlertService
+
+
+def subscriber_send_alert(api_type, order_data, response_data, api_key):
+    topic = "order.placed" if api_type == "placeorder" else f"order.{api_type}"
+    event = OrderEvent(
+        mode="live",
+        api_type=api_type,
+        request_data=order_data,
+        response_data=response_data,
+        api_key=api_key,
+        topic=topic,
+    )
+    alert = alert_for(event)
+    if alert is not None:
+        from services.telegram_alert_service import telegram_alert_service
+        telegram_alert_service.send_order_alert(api_type, order_data, response_data, api_key)
 from strategies.liveonopenalgo.macdfno import (
     format_trade_alert as macd_format_trade_alert,
     format_paper_exit_alert as macd_format_exit_alert,
