@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { tradingApi } from '@/api/trading'
+import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -1631,9 +1632,10 @@ export default function Positions() {
                                       </Button>
                                       <div className="space-y-1">
                                         <div className="flex items-center gap-2">
-                                          <span className="font-semibold text-foreground">
-                                            {position.symbol}
-                                          </span>
+                                          <ChartSymbolLink
+                                            symbol={position.symbol}
+                                            exchange={position.exchange}
+                                          />
                                           {contractRec && (
                                             <Badge
                                               variant="outline"
