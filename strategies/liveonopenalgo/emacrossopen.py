@@ -907,8 +907,9 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
     except (TypeError, ValueError):
         entry_price_val = 0.0
 
-    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.00")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", str(LONG_PROFIT_TARGET_PCT))) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", str(SHORT_PROFIT_TARGET_PCT)))
     sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
+    strat_subtitle = "Candidate EXP_V - Volume Swing Architecture" if ENABLE_VOLUME_FILTER else "EMA + MACD Asymmetric V2-2"
 
     if entry_price_val > 0:
         if direction == "LONG":
@@ -935,9 +936,21 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
         else:
             price_lines = f"<b>Entry Price:</b> ₹{entry_price_val:.2f}\n{target_sl_lines}"
 
+    extra_metrics = ""
+    if data.get("prior_rvol") is not None:
+        try:
+            extra_metrics += f"\n<b>Prior RVOL:</b> {float(data['prior_rvol']):.2f}"
+        except (TypeError, ValueError):
+            pass
+    if data.get("daily_ema_50") is not None:
+        try:
+            extra_metrics += f"\n<b>Daily 50 EMA:</b> ₹{float(data['daily_ema_50']):.2f}"
+        except (TypeError, ValueError):
+            pass
+
     return (
         f"{dir_emoji} <b>PAPER TRADE — ORDER PLACED</b>\n\n"
-        f"<b>Strategy:</b> {strategy_name} (EMA + MACD Asymmetric V2-2)\n"
+        f"<b>Strategy:</b> {strategy_name} ({strat_subtitle})\n"
         f"🔬 <b>ANALYZE MODE - No Real Order</b>\n"
         f"─────────────────────\n"
         f"<b>Symbol:</b> <code>{contract}</code> ({symbol})\n"
@@ -960,7 +973,8 @@ def format_paper_trade_alert(data: Dict[str, Any]) -> str:
         f"<b>EMA26:</b> {data.get('ema26', 0.0):.2f}\n"
         f"<b>MACD:</b> {data.get('macd', 0.0):.2f}\n"
         f"<b>Signal:</b> {data.get('macd_signal', 0.0):.2f}\n"
-        f"<b>Histogram:</b> {data.get('macd_histogram', 0.0):+.2f}\n"
+        f"<b>Histogram:</b> {data.get('macd_histogram', 0.0):+.2f}"
+        f"{extra_metrics}\n"
         f"─────────────────────\n"
         f"<i>ℹ️ Mode: PAPER / ANALYZE ONLY</i>"
     )
@@ -995,8 +1009,9 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
         pnl_pct = 0.0
         pnl_abs = 0.0
 
-    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", "3.00")) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", "1.50"))
+    target_pct = float(os.getenv("LONG_PROFIT_TARGET_PCT", str(LONG_PROFIT_TARGET_PCT))) if direction == "LONG" else float(os.getenv("SHORT_PROFIT_TARGET_PCT", str(SHORT_PROFIT_TARGET_PCT)))
     sl_pct = float(os.getenv("CATASTROPHE_SL_PCT", "6.00"))
+    strat_subtitle = "Candidate EXP_V - Volume Swing Architecture" if ENABLE_VOLUME_FILTER else "EMA + MACD Asymmetric V2-2"
 
     if entry_price > 0:
         if direction == "LONG":
@@ -1041,7 +1056,7 @@ def format_paper_exit_alert(data: Dict[str, Any]) -> str:
 
     return (
         f"{pnl_emoji} <b>PAPER TRADE — {reason_header}</b>\n\n"
-        f"<b>Strategy:</b> {strategy_name} (EMA + MACD Asymmetric V2-2)\n"
+        f"<b>Strategy:</b> {strategy_name} ({strat_subtitle})\n"
         f"🔬 <b>ANALYZE MODE - No Real Order</b>\n"
         f"─────────────────────\n"
         f"<b>Symbol:</b> <code>{contract}</code> ({symbol})\n"
@@ -4892,7 +4907,8 @@ def run_automated_tests() -> bool:
 
         # SUNPHARMA IS in TOP_LONGS -> should be placed
         sig_sun = {"signal": "BUY", "timestamp": "2026-09-04T10:15:00+05:30", "candle_time_str": "04-Sep-2026 10:15 IST"}
-        p_sun, _ = engine36.execute_symbol_decision("SUNPHARMA", sig_sun, active_positions_count=0)
+        with patch(f"{__name__}.send_telegram_alert"):
+            p_sun, _ = engine36.execute_symbol_decision("SUNPHARMA", sig_sun, active_positions_count=0)
         assert p_sun is True, "SUNPHARMA failed to place LONG order!"
         if tmp_state36.exists():
             tmp_state36.unlink()
@@ -5219,7 +5235,8 @@ def run_automated_tests() -> bool:
             "close": 12000.0,
             "daily_ema_50": 11500.0,
         }
-        placed45, _ = engine45.execute_symbol_decision("MARUTI", sig45, active_positions_count=0)
+        with patch(f"{__name__}.send_telegram_alert"):
+            placed45, _ = engine45.execute_symbol_decision("MARUTI", sig45, active_positions_count=0)
         assert placed45 is True, "High RVOL trade was not placed"
         if tmp_state45.exists():
             tmp_state45.unlink()
