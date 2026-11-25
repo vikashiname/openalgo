@@ -59,6 +59,7 @@ db/backups/
 !all_symbols.csv
 !data/qtyfreeze.csv
 !docs/migration/*.csv
+!strategies/liveonopenalgo/data/*.csv
 
 # Environments 
 .env 
