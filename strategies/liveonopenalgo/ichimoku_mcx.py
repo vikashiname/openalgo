@@ -192,7 +192,7 @@ if not logger.handlers:
 OPENALGO_API_KEY = (
     os.getenv("OPENALGO_API_KEY")
     or os.getenv("API_KEY")
-    or "a93a6d4254acb477c693e0776b9c34ef4f129d0a94a4c1c100235186f8e1a41e"
+    or "70abbff43065667202d02e5eb49e831b38f8fd67e185490e54a2f43122e906b5"
 )
 
 OPENALGO_HOST = os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000")
