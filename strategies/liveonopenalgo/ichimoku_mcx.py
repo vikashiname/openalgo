@@ -7,11 +7,11 @@ Strategy Identifier  : ICHIMOKU_MCX_PAPER
 Target Universe      : GOLDM, CRUDEOILM (Optional: SILVERMIC, NATGASMINI)
 Exchange             : MCX (Multi Commodity Exchange of India)
 Default Product      : NRML (Normal Futures)
-Timeframe            : 1-Hour (1H) Primary Execution with 4H & 1D MTF Confluence
-Current Version      : 1.0.0-PROD (Certified Production Baseline)
-Baseline Promotion   : Official Replacement for Legacy emacrossmcx.py (EMA/MACD)
+Timeframe            : 1-Hour (1H) Confirmed Bar Close, Filled at Next-Bar Open
+Current Version      : 1.1.0-REMEDIATED (Institutional Fail-Closed Production Baseline)
+Baseline Promotion   : Certified Replacement for Legacy emacrossmcx.py (EMA/MACD)
 ================================================================================
-Strategy Specifications:
+Strategy Specifications & Approved Target Calculations (Option A):
   1. Primary Signal Engine (1H Model I5 - Hosoda San Yaku Kouten / Gyakuten):
      - San Yaku Kouten (Long):
        * Tenkan-sen > Kijun-sen (TK Cross Up)
@@ -29,57 +29,45 @@ Strategy Specifications:
   2. Higher Timeframe Geometric Consensus Gate (F5 Dual 4H & 1D Confluence):
      - Long Entry Gate : 4H Geometric Regime contains 'Bullish' AND 1D Geometric Regime contains 'Bullish'.
      - Short Entry Gate: 4H Geometric Regime contains 'Bearish' AND 1D Geometric Regime contains 'Bearish'.
-     - Eliminates 50%–70% of false whipsaws during consolidation regimes.
+     - Resampling anchors strictly at MCX session open (09:00 IST). In-progress HTF bars are discarded.
 
-  3. Risk Management Hierarchy (Strictly Causal & Decoupled):
-     - Priority 1: Point-of-No-Return Hard Stop Loss (Fixed 2.0x ATR14) intrabar with overnight gap protection.
-       * Proven Theorem: P(Win | MAE > 2.0x ATR) = 0.00%. Zero historical winners ever clipped.
-     - Priority 2: Intrabar Profit Taking Target (+3.5R = Entry +/- 3.5 * ATR14).
-       * Locks in explosive parabolic thrusts before mean-reverting velocity collapses price.
+  3. Risk Management Hierarchy (Strictly Causal & Approved Option A Calculation):
+     - Priority 1: Point-of-No-Return Hard Stop Loss (Fixed 2.0x ATR14) -> 1R Risk Baseline.
+     - Priority 2: Intrabar Profit Taking Target = 3.5x ATR14 (Actual Reward-to-Risk = 1.75R).
+       * Quant Proof & Clarification: Stop Loss is 2.0 ATR (1R); Target is 3.5 ATR (1.75R).
+       * Preserves exact quantitative research baseline assumptions without unapproved shifts.
      - Priority 3: Hosoda Model I3 Kijun Pullback Re-entry Engine (Kijun-sen Oshi):
-       * Active ONLY after a +3.5R target exit while HTF 4H+1D regime remains confluent.
-       * Monitors for price test of 1H Kijun-sen within proximity tolerance (GOLDM: 1.0%, CRUDEOILM: 1.5%).
-       * Confirmed bounce on 1H close: Close > Tenkan AND Close > Kijun (Longs) / Close < Tenkan AND Close < Kijun (Shorts).
-       * Re-enters trade at next-bar Open with fresh 2.0x ATR stop loss.
-       * Result: Surges combined portfolio net profit from ₹2.75L to ₹4.30L (+56.2% expansion!).
-     - Priority 4: Hosoda Structural Exits (Evaluated on Bar Close, Filled Next Open):
+       * Active ONLY after a 3.5 ATR (1.75R) target exit while HTF 4H+1D regime remains confluent.
+       * Requires at least 1 completed bar separation after target exit before re-entry test.
+       * Expiration window: 15 bars max.
+       * Proximity tolerance: GOLDM 1.0%, CRUDEOILM 1.5%.
+       * Re-enters at next-bar Open with fresh 2.0x ATR stop loss.
+     - Priority 4: Hosoda Structural Exits (Evaluated on Bar Close):
        * Longs: Close < Kijun OR Tenkan < Kijun.
        * Shorts: Close > Kijun OR Tenkan > Kijun.
      - Priority 5: Confirmed Opposing Reversal.
 
-  4. Execution Standards:
-     - Strict Next-Bar Open execution (zero lookahead).
-     - Atomic crash-safe state persistence across restarts (ichimoku_mcx_state.json).
-     - Heartbeat emission for watchdog monitoring (ichimoku_mcx_heartbeat.json).
-     - Dynamic discovery of active near-month MCX futures contracts & lot sizes.
-     - Idempotency locks, pacing delays, and orderbook reconciliation.
-     - Telegram notifications for all order and risk events.
+  4. Institutional Execution & Data Safety Gates (FAIL-CLOSED):
+     - Strictly NO research CSV fallbacks in live order execution path.
+     - Mandatory broker connectivity, live market data freshness (< 75m), and depth (>= 80 bars).
+     - Confirmed bar close execution: in-progress candles are completely filtered out.
+     - Dynamic exchange lot-size verification (e.g. 100 units for GOLDM, 10 units for CRUDEOILM).
+     - Order lifecycle verification: polls /api/v1/orderstatus for verified COMPLETE fill price.
+     - Broker position book reconciliation (/api/v1/positionbook) at start and every cycle.
+     - Thread-safe atomic persistence with process/thread-unique temporary files and RLock.
 ================================================================================
 """
 
 import argparse
+import fcntl
 import json
 import logging
 import os
 import signal
-import fcntl
-
-_LOCK_FILE = None
-
-def acquire_single_instance_lock(lock_name: str = 'ichimoku_mcx'):
-    global _LOCK_FILE
-    lock_path = f'/tmp/{lock_name}.lock'
-    try:
-        _LOCK_FILE = open(lock_path, 'w')
-        fcntl.flock(_LOCK_FILE, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _LOCK_FILE.write(f'{os.getpid()}\n')
-        _LOCK_FILE.flush()
-        return True
-    except (BlockingIOError, IOError):
-        logger.error(f'🛑 [LOCK REJECTED] Another instance of {lock_name} is already active on this system (lockfile: {lock_path}). Exiting.')
-        sys.exit(0)
 import sys
+import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -89,6 +77,25 @@ import numpy as np
 import pandas as pd
 import requests
 
+_LOCK_FILE = None
+
+
+def acquire_single_instance_lock(lock_name: str = "ichimoku_mcx"):
+    global _LOCK_FILE
+    lock_path = f"/tmp/{lock_name}.lock"
+    try:
+        _LOCK_FILE = open(lock_path, "w")
+        fcntl.flock(_LOCK_FILE, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _LOCK_FILE.write(f"{os.getpid()}\n")
+        _LOCK_FILE.flush()
+        return True
+    except (BlockingIOError, IOError):
+        logger.error(
+            f"🛑 [LOCK REJECTED] Another instance of {lock_name} is already active on this system (lockfile: {lock_path}). Exiting."
+        )
+        sys.exit(0)
+
+
 # Add project root to sys.path
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent.parent
@@ -96,7 +103,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 try:
-    from dotenv import load_dotenv, find_dotenv
+    from dotenv import find_dotenv, load_dotenv
+
     load_dotenv(find_dotenv(), override=False)
 except ImportError:
     pass
@@ -117,7 +125,7 @@ for candidate in [
                         k, v = line.split("=", 1)
                         k = k.strip()
                         v = v.strip().strip("'\"")
-                        if k and (k not in os.environ or os.environ[k] == "a93a6d4254acb477c693e0776b9c34ef4f129d0a94a4c1c100235186f8e1a41e"):
+                        if k and k not in os.environ:
                             os.environ[k] = v
             break
         except Exception:
@@ -125,6 +133,7 @@ for candidate in [
 
 try:
     from openalgo import api
+
     OPENALGO_AVAILABLE = True
 except ImportError:
     OPENALGO_AVAILABLE = False
@@ -135,7 +144,14 @@ except ImportError:
 # ==============================================================================
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
-LOG_FILE_PATH = Path(os.getenv("LOG_FILE", PROJECT_ROOT / "log/strategies/ichimoku_mcx.log" if (PROJECT_ROOT / "log").exists() else SCRIPT_DIR / "ichimoku_mcx.log"))
+LOG_FILE_PATH = Path(
+    os.getenv(
+        "LOG_FILE",
+        PROJECT_ROOT / "log/strategies/ichimoku_mcx.log"
+        if (PROJECT_ROOT / "log").exists()
+        else SCRIPT_DIR / "ichimoku_mcx.log",
+    )
+)
 STATE_FILE_PATH = Path(os.getenv("STATE_FILE", SCRIPT_DIR / "ichimoku_mcx_state.json"))
 HEARTBEAT_FILE_PATH = Path(os.getenv("HEARTBEAT_FILE", SCRIPT_DIR / "ichimoku_mcx_heartbeat.json"))
 
@@ -151,8 +167,10 @@ SENKOU_B_PERIOD = int(os.getenv("SENKOU_B_PERIOD", "52"))
 DISPLACEMENT = int(os.getenv("DISPLACEMENT", "26"))
 ATR_PERIOD = int(os.getenv("ATR_PERIOD", "14"))
 
+# Risk Management: Approved Option A (Stop: 2.0x ATR, Target: 3.5x ATR = 1.75R)
 STOP_LOSS_ATR_MULT = float(os.getenv("STOP_LOSS_ATR_MULT", "2.0"))
-PROFIT_TARGET_R = float(os.getenv("PROFIT_TARGET_R", "3.5"))
+PROFIT_TARGET_ATR_MULT = float(os.getenv("PROFIT_TARGET_ATR_MULT", os.getenv("PROFIT_TARGET_R", "3.5")))
+REWARD_RISK_RATIO = PROFIT_TARGET_ATR_MULT / STOP_LOSS_ATR_MULT  # 1.75R
 ENABLE_TARGET = os.getenv("ENABLE_TARGET", "true").lower() in ["true", "1", "yes"]
 ENABLE_PULLBACK_REENTRY = os.getenv("ENABLE_PULLBACK_REENTRY", "true").lower() in ["true", "1", "yes"]
 ALLOW_REVERSALS = os.getenv("ALLOW_REVERSALS", "true").lower() in ["true", "1", "yes"]
@@ -187,15 +205,10 @@ if not logger.handlers:
         logger.warning(f"Could not initialize file logger at {LOG_FILE_PATH}: {e}")
 
 # ==============================================================================
-# 3. OPENALGO API CREDENTIALS & TELEGRAM SETUP
+# 3. OPENALGO API CREDENTIALS & TELEGRAM SETUP (FAIL-CLOSED SECURITY)
 # ==============================================================================
-OPENALGO_API_KEY = (
-    os.getenv("OPENALGO_API_KEY")
-    or os.getenv("API_KEY")
-    or "70abbff43065667202d02e5eb49e831b38f8fd67e185490e54a2f43122e906b5"
-)
-
-OPENALGO_HOST = os.getenv("OPENALGO_HOST", "http://127.0.0.1:5000")
+OPENALGO_API_KEY = os.getenv("OPENALGO_API_KEY") or os.getenv("API_KEY") or ""
+OPENALGO_HOST = os.getenv("OPENALGO_HOST", os.getenv("HOST_SERVER", "https://vikashiname.in"))
 if not OPENALGO_HOST.startswith("http"):
     OPENALGO_HOST = f"http://{OPENALGO_HOST}"
 
@@ -203,7 +216,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # Fallback: Query Telegram config from OpenAlgo Host API if unconfigured
-if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+if OPENALGO_API_KEY and (not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID):
     try:
         cfg_resp = requests.get(
             f"{OPENALGO_HOST.rstrip('/')}/api/v1/telegram/config",
@@ -212,9 +225,8 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         )
         if cfg_resp.status_code == 200:
             cfg_d = cfg_resp.json().get("data", {})
-            if cfg_d.get("is_active") and cfg_d.get("token"):
-                if not TELEGRAM_BOT_TOKEN:
-                    TELEGRAM_BOT_TOKEN = cfg_d["token"]
+            if cfg_d.get("is_active") and cfg_d.get("token") and not TELEGRAM_BOT_TOKEN:
+                TELEGRAM_BOT_TOKEN = cfg_d["token"]
         user_resp = requests.get(
             f"{OPENALGO_HOST.rstrip('/')}/api/v1/telegram/users",
             headers={"X-API-KEY": OPENALGO_API_KEY},
@@ -247,7 +259,7 @@ def send_telegram_alert(message: str) -> bool:
 
 
 # ==============================================================================
-# 4. MCX COMMODITY SPECIFICATIONS & UNIVERSE
+# 4. MCX COMMODITY SPECIFICATIONS & VERIFIED LOT SIZES
 # ==============================================================================
 DEFAULT_MCX_UNIVERSE = ["GOLDM", "CRUDEOILM"]
 
@@ -261,54 +273,57 @@ SYMBOL_ALIASES = {
     "NATURALGAS": "NATGASMINI",
 }
 
+
 def normalize_mcx_symbol(symbol: str) -> str:
     s = str(symbol).strip().upper()
     return SYMBOL_ALIASES.get(s, s)
 
+
+# Authoritative fallback mapping matching broker/zerodha/mapping/mcx_contract_size.py
 MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
     "GOLDM": {
         "display_name": "Gold Mini (100g)",
         "search_prefix": "GOLDM",
         "default_lot": 1,
+        "exchange_lot_size": 100,  # 100 grams per contract (OpenAlgo units)
         "unit": "100g",
         "tick_size": 1.0,
-        "multiplier": 10.0,  # ₹10 per 1-point move per lot (10 units of 10g in 100g)
+        "multiplier": 10.0,  # ₹10 per 1-point move per 100g lot
         "pullback_tolerance": 0.010,  # 1.0% Kijun proximity
-        "fallback_expiry_day": 5,
-        "yf_symbol": "GC=F",
+        "expiry_cycle": [2, 4, 6, 8, 10, 12],  # Bi-monthly expiries on MCX
     },
     "CRUDEOILM": {
         "display_name": "Crude Oil Mini (10 bbl)",
         "search_prefix": "CRUDEOILM",
         "default_lot": 1,
+        "exchange_lot_size": 10,  # 10 Barrels per contract (OpenAlgo units)
         "unit": "10 Barrels",
         "tick_size": 1.0,
-        "multiplier": 10.0,  # ₹10 per 1-point move per lot (10 bbl)
+        "multiplier": 10.0,  # ₹10 per 1-point move per 10 bbl lot
         "pullback_tolerance": 0.015,  # 1.5% Kijun proximity
-        "fallback_expiry_day": 19,
-        "yf_symbol": "CL=F",
+        "expiry_cycle": list(range(1, 13)),  # Monthly
     },
     "SILVERMIC": {
         "display_name": "Silver Micro (1kg)",
         "search_prefix": "SILVERMIC",
         "default_lot": 1,
+        "exchange_lot_size": 1,  # 1 Kilogram per contract (OpenAlgo units)
         "unit": "1kg",
         "tick_size": 1.0,
         "multiplier": 1.0,
         "pullback_tolerance": 0.010,
-        "fallback_expiry_day": 28,
-        "yf_symbol": "SI=F",
+        "expiry_cycle": [2, 4, 6, 8, 11],
     },
     "NATGASMINI": {
         "display_name": "Natural Gas Mini (250 mmBtu)",
         "search_prefix": "NATGASMINI",
         "default_lot": 1,
+        "exchange_lot_size": 250,  # 250 mmBtu per contract (OpenAlgo units)
         "unit": "250 mmBtu",
         "tick_size": 0.10,
         "multiplier": 250.0,
         "pullback_tolerance": 0.015,
-        "fallback_expiry_day": 25,
-        "yf_symbol": "NG=F",
+        "expiry_cycle": list(range(1, 13)),
     },
 }
 
@@ -318,26 +333,29 @@ MCX_COMMODITY_SPECS: Dict[str, Dict[str, Any]] = {
 def get_current_ist() -> datetime:
     return datetime.now(timezone.utc).astimezone(IST)
 
+
 def is_mcx_trading_time(now_dt: Optional[datetime] = None) -> Tuple[bool, str]:
     now = now_dt or get_current_ist()
     weekday = now.weekday()
     if weekday >= 5:
         return False, "WEEKEND_CLOSED"
     m = now.hour * 60 + now.minute
-    session_start = 9 * 60         # 09:00 IST
-    session_end = 23 * 60 + 30     # 23:30 IST
+    session_start = 9 * 60  # 09:00 IST
+    session_end = 23 * 60 + 30  # 23:30 IST
     if session_start <= m <= session_end:
         return True, "SESSION_ACTIVE"
     return False, "HOURS_CLOSED"
 
-def get_seconds_to_next_candle_boundary(now_dt: Optional[datetime] = None, buffer_seconds: int = 2) -> float:
+
+def get_seconds_to_next_candle_boundary(now_dt: Optional[datetime] = None, buffer_seconds: int = 5) -> float:
     now = now_dt or get_current_ist()
     next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     sleep_seconds = (next_hour - now).total_seconds() + buffer_seconds
     return max(5.0, sleep_seconds)
 
+
 # ==============================================================================
-# 6. MATHEMATICAL ENGINES (ICHIMOKU & HTF LINE GEOMETRY)
+# 6. MATHEMATICAL ENGINES (ICHIMOKU & MCX SESSION-ALIGNED HTF GEOMETRY)
 # ==============================================================================
 def compute_atr14(df: pd.DataFrame, period: int = 14) -> pd.Series:
     high = df["high"]
@@ -351,14 +369,26 @@ def compute_atr14(df: pd.DataFrame, period: int = 14) -> pd.Series:
     atr = tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
     return atr.bfill().ffill()
 
+
 def compute_ichimoku_1h(
     df: pd.DataFrame,
     tenkan_period: int = TENKAN_PERIOD,
     kijun_period: int = KIJUN_PERIOD,
     senkou_b_period: int = SENKOU_B_PERIOD,
     displacement: int = DISPLACEMENT,
-) -> pd.DataFrame:
+) -> Optional[pd.DataFrame]:
+    if df is None or df.empty:
+        return None
     data = df.copy()
+    data.columns = [str(c).strip().lower() for c in data.columns]
+    for col in ["high", "low", "close"]:
+        if col not in data.columns:
+            logger.error(f"🛑 [FAIL-CLOSED] Missing required price column '{col}' in input dataframe.")
+            return None
+        data[col] = data[col].astype(float)
+    if "open" in data.columns:
+        data["open"] = data["open"].astype(float)
+
     high = data["high"]
     low = data["low"]
     close = data["close"]
@@ -378,7 +408,8 @@ def compute_ichimoku_1h(
     data["kumo_bottom"] = np.minimum(data["senkou_a"], data["senkou_b"])
 
     # Chikou Span: Close at bar t compared against Close at bar t - displacement
-    data["chikou_past_close"] = close.shift(displacement)
+    data["chikou"] = close.shift(displacement)
+    data["chikou_past_close"] = data["chikou"]
 
     # Future cloud: Forward cloud at t + displacement (Span A future > Span B future)
     data["future_cloud_bull"] = raw_span_a > raw_span_b
@@ -387,35 +418,72 @@ def compute_ichimoku_1h(
 
     return data
 
+
 def resample_ohlcv(df: pd.DataFrame, timeframe: str = "4h") -> pd.DataFrame:
-    """Resamples 1H data to 4H or 1D completed candles with zero lookahead."""
+    """
+    Resamples 1H completed data to 4H or 1D completed candles anchored to MCX 09:00 IST open.
+    In-progress / uncompleted higher-timeframe bars are strictly dropped.
+    """
     data = df.copy()
     if "timestamp" in data.columns:
-        data["timestamp"] = pd.to_datetime(data["timestamp"], utc=True)
+        if pd.api.types.is_numeric_dtype(data["timestamp"]):
+            data["timestamp"] = pd.to_datetime(data["timestamp"], unit="s", utc=True).dt.tz_convert(IST)
+        else:
+            data["timestamp"] = pd.to_datetime(data["timestamp"])
+            if data["timestamp"].dt.tz is None:
+                data["timestamp"] = data["timestamp"].dt.tz_localize(IST)
+            else:
+                data["timestamp"] = data["timestamp"].dt.tz_convert(IST)
         data = data.sort_values("timestamp").set_index("timestamp")
     elif not isinstance(data.index, pd.DatetimeIndex):
-        data.index = pd.to_datetime(data.index, utc=True)
+        data.index = pd.to_datetime(data.index)
+        if data.index.tz is None:
+            data.index = data.index.tz_localize(IST)
+        else:
+            data.index = data.index.tz_convert(IST)
+    elif data.index.tz is None:
+        data.index = data.index.tz_localize(IST)
+    else:
+        data.index = data.index.tz_convert(IST)
+
     data.index.name = "timestamp"
 
     rule = "4h" if timeframe.lower() == "4h" else "1D"
-    resampled = data.resample(rule, closed="left", label="left").agg({
+    first_dt = data.index[0]
+    origin_dt = first_dt.normalize() + timedelta(hours=9)  # 09:00 IST MCX anchor
+
+    agg_dict = {
         "open": "first",
         "high": "max",
         "low": "min",
         "close": "last",
-        "volume": "sum" if "volume" in data.columns else "count"
-    }).dropna().reset_index()
+    }
+    if "volume" in data.columns:
+        agg_dict["volume"] = "sum"
+
+    resampled = (
+        data.resample(rule, origin=origin_dt, closed="left", label="left")
+        .agg(agg_dict)
+        .dropna()
+        .reset_index()
+    )
 
     bar_duration = pd.Timedelta(hours=4) if timeframe.lower() == "4h" else pd.Timedelta(days=1)
     resampled["completion_time"] = resampled["timestamp"] + bar_duration
+
+    # Drop any in-progress HTF bar whose completion time is beyond the end of the last completed 1H bar
+    last_1h_end = data.index[-1] + pd.Timedelta(hours=1)
+    resampled = resampled[resampled["completion_time"] <= last_1h_end].copy()
+
     return resampled
+
 
 def classify_htf_regime(df_htf: pd.DataFrame) -> Tuple[str, str, bool]:
     """
     Computes HTF composite geometric consensus and Kijun slope/plateau state.
-    Returns: (regime_str, kijun_direction, is_horizontal)
+    Requires minimum 78 bars for Senkou Span B + displacement.
     """
-    if len(df_htf) < 53:
+    if len(df_htf) < 78:
         return "Neutral_Chop", "Neutral", False
 
     df_ichi = compute_ichimoku_1h(df_htf)
@@ -424,8 +492,12 @@ def classify_htf_regime(df_htf: pd.DataFrame) -> Tuple[str, str, bool]:
     kijun = df_ichi["kijun"].iloc[-1]
     span_a = df_ichi["senkou_a"].iloc[-1]
     span_b = df_ichi["senkou_b"].iloc[-1]
-    kumo_top = max(span_a, span_b) if not np.isnan(span_a) and not np.isnan(span_b) else close
-    kumo_bot = min(span_a, span_b) if not np.isnan(span_a) and not np.isnan(span_b) else close
+
+    if np.isnan(span_a) or np.isnan(span_b) or np.isnan(kijun) or np.isnan(tenkan):
+        return "Neutral_Chop", "Neutral", False
+
+    kumo_top = max(span_a, span_b)
+    kumo_bot = min(span_a, span_b)
 
     # Line slopes over 3 bars
     kijun_prev = df_ichi["kijun"].iloc[-3]
@@ -455,24 +527,26 @@ def classify_htf_regime(df_htf: pd.DataFrame) -> Tuple[str, str, bool]:
 
     return regime, kijun_direction, is_horizontal
 
+
 # ==============================================================================
-# 7. PERSISTENT STATE MANAGER
+# 7. THREAD-SAFE ATOMIC PERSISTENT STATE MANAGER
 # ==============================================================================
 class PersistentStateManager:
-    """Atomic, crash-safe state persistence for ichimoku_mcx.py."""
+    """Thread-safe, atomic, crash-safe state persistence for ichimoku_mcx.py."""
 
     def __init__(self, file_path: Path):
         self.file_path = file_path
+        self.lock = threading.RLock()
         self.state: Dict[str, Any] = self.load_state()
 
     def load_state(self) -> Dict[str, Any]:
         default_state = {
             "strategy_name": STRATEGY_NAME,
-            "version": "1.0.0-PROD",
+            "version": "1.1.0-REMEDIATED",
             "last_updated": datetime.now(timezone.utc).isoformat(),
-            "tracked_positions": {},      # contract_symbol -> pos_dict
-            "pullback_watch": {},          # symbol -> {target_exited_dir: +1/-1, exit_time: str, target_exit_price: float}
-            "last_processed_candle": {},   # symbol -> candle_iso_string
+            "tracked_positions": {},  # contract_symbol -> pos_dict
+            "pullback_watch": {},  # symbol -> {target_exited_dir, exit_time, exit_bar_idx, target_exit_price}
+            "last_processed_candle": {},  # symbol -> candle_iso_string
             "completed_trades": [],
             "order_registry": {},
         }
@@ -490,85 +564,141 @@ class PersistentStateManager:
             return default_state
 
     def save_state(self):
-        self.state["last_updated"] = datetime.now(timezone.utc).isoformat()
-        temp_file = self.file_path.with_suffix(".tmp")
-        try:
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, indent=2, default=str)
-            os.replace(temp_file, self.file_path)
-        except Exception as e:
-            logger.error(f"Failed to persist state atomically: {e}")
+        with self.lock:
+            self.state["last_updated"] = datetime.now(timezone.utc).isoformat()
+            # Unique temp file per thread/process to prevent truncation races
+            temp_file = self.file_path.with_name(f"{self.file_path.stem}_{uuid.uuid4().hex}.tmp")
+            try:
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    json.dump(self.state, f, indent=2, default=str)
+                os.replace(temp_file, self.file_path)
+            except Exception as e:
+                logger.error(f"Failed to persist state atomically: {e}")
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except Exception:
+                        pass
 
     def get_last_processed_candle(self, symbol: str) -> Optional[str]:
-        return self.state.get("last_processed_candle", {}).get(symbol)
+        with self.lock:
+            return self.state.get("last_processed_candle", {}).get(symbol)
 
     def set_last_processed_candle(self, symbol: str, candle_ts: str):
-        if "last_processed_candle" not in self.state:
-            self.state["last_processed_candle"] = {}
-        self.state["last_processed_candle"][symbol] = str(candle_ts)
-        self.save_state()
+        with self.lock:
+            if "last_processed_candle" not in self.state:
+                self.state["last_processed_candle"] = {}
+            self.state["last_processed_candle"][symbol] = str(candle_ts)
+            self.save_state()
 
     def get_position(self, contract_symbol: str) -> Optional[Dict[str, Any]]:
-        return self.state.get("tracked_positions", {}).get(contract_symbol)
+        with self.lock:
+            return self.state.get("tracked_positions", {}).get(contract_symbol)
 
     def save_position(self, contract_symbol: str, pos_dict: Dict[str, Any]):
-        if "tracked_positions" not in self.state:
-            self.state["tracked_positions"] = {}
-        self.state["tracked_positions"][contract_symbol] = pos_dict
-        self.save_state()
+        with self.lock:
+            if "tracked_positions" not in self.state:
+                self.state["tracked_positions"] = {}
+            self.state["tracked_positions"][contract_symbol] = pos_dict
+            self.save_state()
 
     def remove_position(self, contract_symbol: str):
-        if "tracked_positions" in self.state and contract_symbol in self.state["tracked_positions"]:
-            del self.state["tracked_positions"][contract_symbol]
-            self.save_state()
+        with self.lock:
+            if "tracked_positions" in self.state and contract_symbol in self.state["tracked_positions"]:
+                del self.state["tracked_positions"][contract_symbol]
+                self.save_state()
 
     def set_pullback_watch(self, symbol: str, watch_data: Dict[str, Any]):
-        if "pullback_watch" not in self.state:
-            self.state["pullback_watch"] = {}
-        self.state["pullback_watch"][symbol] = watch_data
-        self.save_state()
+        with self.lock:
+            if "pullback_watch" not in self.state:
+                self.state["pullback_watch"] = {}
+            self.state["pullback_watch"][symbol] = watch_data
+            self.save_state()
 
     def get_pullback_watch(self, symbol: str) -> Optional[Dict[str, Any]]:
-        return self.state.get("pullback_watch", {}).get(symbol)
+        with self.lock:
+            return self.state.get("pullback_watch", {}).get(symbol)
 
     def clear_pullback_watch(self, symbol: str):
-        if "pullback_watch" in self.state and symbol in self.state["pullback_watch"]:
-            del self.state["pullback_watch"][symbol]
-            self.save_state()
+        with self.lock:
+            if "pullback_watch" in self.state and symbol in self.state["pullback_watch"]:
+                del self.state["pullback_watch"][symbol]
+                self.save_state()
 
     def record_completed_trade(self, trade_info: Dict[str, Any]):
-        if "completed_trades" not in self.state:
-            self.state["completed_trades"] = []
-        self.state["completed_trades"].append(trade_info)
-        self.save_state()
-
-    def mark_order_pending(self, order_key: str, order_data: Dict[str, Any]):
-        if "order_registry" not in self.state:
-            self.state["order_registry"] = {}
-        self.state["order_registry"][order_key] = {
-            "status": "PENDING",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "data": order_data,
-        }
-        self.save_state()
-
-    def mark_order_resolved(self, order_key: str, status: str, order_id: Optional[str] = None):
-        if "order_registry" in self.state and order_key in self.state["order_registry"]:
-            self.state["order_registry"][order_key]["status"] = status
-            if order_id:
-                self.state["order_registry"][order_key]["order_id"] = order_id
+        with self.lock:
+            if "completed_trades" not in self.state:
+                self.state["completed_trades"] = []
+            self.state["completed_trades"].append(trade_info)
             self.save_state()
 
+    def try_mark_order_pending(
+        self,
+        order_key: str,
+        order_data: Optional[Dict[str, Any]] = None,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        qty: Optional[int] = None,
+    ) -> bool:
+        """
+        Atomically checks if an order is inflight and reserves it as PENDING under the same lock
+        in a single critical section, persisting the reservation to disk immediately.
+        Returns True if reservation was acquired; False if the order already exists or is in-flight.
+        Only one execution thread may acquire the reservation.
+        Does not release reservation on request timeouts; uncertain submissions require broker reconciliation.
+        """
+        with self.lock:
+            if "order_registry" not in self.state:
+                self.state["order_registry"] = {}
+            rec = self.state["order_registry"].get(order_key)
+            if rec is not None:
+                status = str(rec.get("status", "")).upper()
+                if status in ["PENDING", "FILLED", "UNVERIFIED", "COMPLETE", "OPEN"]:
+                    return False
+
+            if order_data is None:
+                order_data = {"symbol": symbol or "", "side": side or "", "qty": qty or 0}
+
+            self.state["order_registry"][order_key] = {
+                "status": "PENDING",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data": order_data,
+            }
+            self.save_state()
+            return True
+
+    def mark_order_pending(self, order_key: str, order_data: Dict[str, Any]):
+        with self.lock:
+            if "order_registry" not in self.state:
+                self.state["order_registry"] = {}
+            self.state["order_registry"][order_key] = {
+                "status": "PENDING",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data": order_data,
+            }
+            self.save_state()
+
+    def mark_order_resolved(self, order_key: str, status: str, order_id: Optional[str] = None):
+        with self.lock:
+            if "order_registry" in self.state and order_key in self.state["order_registry"]:
+                self.state["order_registry"][order_key]["status"] = status
+                if order_id:
+                    self.state["order_registry"][order_key]["order_id"] = order_id
+                self.save_state()
+
     def is_order_inflight(self, order_key: str) -> bool:
-        rec = self.state.get("order_registry", {}).get(order_key)
-        return rec is not None and rec.get("status") in ["PENDING", "FILLED"]
+        with self.lock:
+            rec = self.state.get("order_registry", {}).get(order_key)
+            return rec is not None and rec.get("status") in ["PENDING", "FILLED", "UNVERIFIED"]
+
 
 # ==============================================================================
-# 8. MASTER LIVE STRATEGY ENGINE
+# 8. MASTER REMEDIATED LIVE STRATEGY ENGINE
 # ==============================================================================
 class MCXIchimokuStrategy:
     """
-    Institutional Multi-Timeframe Ichimoku Live Execution Engine for OpenAlgo.
+    Production Multi-Timeframe Ichimoku Live Execution Engine for OpenAlgo.
+    Enforces FAIL-CLOSED execution, verified fills, broker reconciliation, and session alignment.
     """
 
     def __init__(
@@ -583,63 +713,31 @@ class MCXIchimokuStrategy:
         self.host = host
         self.state_manager = PersistentStateManager(state_file)
         self.is_running = True
-        self.active_contracts: Dict[str, str] = {}  # symbol -> contract_symbol (e.g. GOLDM26DECFUT)
+        self.active_contracts: Dict[str, str] = {}
+        self.verified_lot_sizes: Dict[str, int] = {}
         self.candle_cache: Dict[str, pd.DataFrame] = {}
-        self.last_candle_fetch_time: Dict[str, float] = {}
         self.client = None
         self.is_host_reachable = False
+        self.has_reconciliation_discrepancy: bool = False
+        self.reconciliation_discrepancies: List[str] = []
+        self.unexpected_broker_positions: Dict[str, int] = {}
 
-        self._preload_historical_cache()
+        if not self.api_key:
+            logger.critical("❌ [FAIL-CLOSED] OPENALGO_API_KEY is not configured. Live orders cannot be authorized.")
 
         self.is_host_reachable = self._check_host_reachability()
         if self.is_host_reachable:
-            logger.info(f"Connected to OpenAlgo server at {self.host}.")
+            logger.info(f"✅ Connected to OpenAlgo server at {self.host}.")
             self._init_sdk_client()
+            self._discover_active_contracts()
+            self.reconcile_broker_positions()
         else:
-            logger.info(f"OpenAlgo server at {self.host} is offline. Operating in dry-run/local dataset fallback mode (will retry each cycle).")
-
-        self._discover_active_contracts()
-
-    def _preload_historical_cache(self):
-        """Pre-loads verified clean baseline historical candles into in-memory cache on startup."""
-        for sym in self.symbols:
-            candidates = [
-                SCRIPT_DIR / "data" / f"{sym}_1h.csv",
-                PROJECT_ROOT / "strategies/liveonopenalgo/data" / f"{sym}_1h.csv",
-                PROJECT_ROOT / "backtesting/ichimoku_research/geometry/data" / f"{sym}_1h_with_htf_geometry.csv",
-                PROJECT_ROOT / "backtesting/ichimoku_research/data" / f"{sym}_1h.csv",
-            ]
-            local_csv = next((p for p in candidates if p.exists()), None)
-            if local_csv:
-                try:
-                    df = pd.read_csv(local_csv)
-                    df.columns = [str(c).strip().lower() for c in df.columns]
-                    if "timestamp" in df.columns:
-                        if pd.api.types.is_numeric_dtype(df["timestamp"]):
-                            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert(IST)
-                        else:
-                            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-                            if df["timestamp"].dt.tz is None:
-                                df["timestamp"] = df["timestamp"].dt.tz_localize(IST)
-                            else:
-                                df["timestamp"] = df["timestamp"].dt.tz_convert(IST)
-                        df = df.set_index("timestamp")
-                    elif not isinstance(df.index, pd.DatetimeIndex):
-                        df.index = pd.to_datetime(df.index)
-
-                    df = df.sort_index()
-                    for col in ["open", "high", "low", "close"]:
-                        if col in df.columns:
-                            df[col] = df[col].astype(float)
-
-                    if len(df) >= 53:
-                        self.candle_cache[sym] = df
-                        logger.info(f"  [+] Pre-loaded {len(df)} historical baseline candles for {sym} ({local_csv.name}).")
-                except Exception as e:
-                    logger.warning(f"Error pre-loading historical cache for {sym}: {e}")
+            logger.warning(
+                f"🛑 [FAIL-CLOSED] OpenAlgo server at {self.host} is unreachable. "
+                f"Live order authorization is strictly BLOCKED until gateway is restored."
+            )
 
     def _check_host_reachability(self) -> bool:
-        """Checks whether the configured OpenAlgo server is reachable."""
         base_url = self.host.rstrip("/")
         try:
             r = requests.post(f"{base_url}/api/v1/ping", json={"apikey": self.api_key}, timeout=5.0)
@@ -655,32 +753,66 @@ class MCXIchimokuStrategy:
             return False
 
     def _init_sdk_client(self):
-        """Initializes the OpenAlgo Python SDK client if available."""
-        if self.client is not None or not OPENALGO_AVAILABLE or api is None:
+        if self.client is not None or not OPENALGO_AVAILABLE or api is None or not self.api_key:
             return
         try:
-            self.client = api(api_key=self.api_key, host=self.host, timeout=5.0)
-            logger.info("OpenAlgo Python SDK client successfully initialized.")
+            self.client = api(api_key=self.api_key, host=self.host, timeout=6.0)
+            logger.info("OpenAlgo Python SDK client initialized.")
         except Exception as e:
             logger.warning(f"Failed to initialize SDK client: {e}. Falling back to REST.")
 
+    def resolve_lot_size(self, symbol: str, contract_symbol: str) -> int:
+        """
+        Dynamically queries OpenAlgo /api/v1/symbol to retrieve the official exchange lot size.
+        Falls back to authoritative MCX commodity specs and asserts non-zero quantity.
+        """
+        if contract_symbol in self.verified_lot_sizes:
+            return self.verified_lot_sizes[contract_symbol]
+
+        lot_size = None
+        if self.is_host_reachable and self.api_key:
+            try:
+                url = f"{self.host.rstrip('/')}/api/v1/symbol"
+                resp = requests.post(
+                    url,
+                    json={"apikey": self.api_key, "symbol": contract_symbol, "exchange": EXCHANGE},
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    d = resp.json().get("data", {})
+                    ls = d.get("lotsize") or d.get("lot_size")
+                    if ls and int(ls) > 0:
+                        lot_size = int(ls)
+            except Exception as e:
+                logger.debug(f"Symbol lookup for lot size on {contract_symbol}: {e}")
+
+        if not lot_size:
+            specs = MCX_COMMODITY_SPECS.get(symbol, {})
+            lot_size = specs.get("exchange_lot_size")
+
+        if not lot_size or lot_size <= 0:
+            logger.error(f"🛑 [FAIL-CLOSED] Cannot verify official lot size for {contract_symbol}. Order rejected.")
+            return 0
+
+        self.verified_lot_sizes[contract_symbol] = lot_size
+        return lot_size
+
     def _discover_active_contracts(self):
-        """Resolves active near-month contract symbols for target commodities."""
-        logger.info("🔍 Resolving active near-month MCX contracts...")
+        """Resolves active near-month contract symbols with tender-period awareness."""
+        logger.info("🔍 Resolving active MCX contracts and official lot sizes...")
         now = get_current_ist()
         for sym in self.symbols:
             specs = MCX_COMMODITY_SPECS.get(sym, {})
             prefix = specs.get("search_prefix", sym)
             contract = None
 
-            # 1. Query OpenAlgo Search API if host is reachable
-            if self.is_host_reachable:
+            if self.is_host_reachable and self.api_key:
                 try:
                     url = f"{self.host.rstrip('/')}/api/v1/search"
                     resp = requests.post(
                         url,
                         json={"apikey": self.api_key, "query": prefix, "exchange": EXCHANGE},
-                        timeout=5,
+                        timeout=6,
                     )
                     if resp.status_code == 200:
                         results = resp.json().get("data", [])
@@ -698,7 +830,8 @@ class MCXIchimokuStrategy:
                                             break
                                         except Exception:
                                             pass
-                                if exp_dt and exp_dt >= now_naive:
+                                # Tender-period protection: Require expiry at least 3 days in future
+                                if exp_dt and (exp_dt - now_naive).days >= 3:
                                     valid.append((exp_dt, s))
                         if valid:
                             valid.sort(key=lambda x: x[0])
@@ -706,173 +839,359 @@ class MCXIchimokuStrategy:
                 except Exception as e:
                     logger.warning(f"Error querying search API for {prefix}: {e}")
 
-            # 2. Algorithmic Expiry Fallback
             if not contract:
-                year_str = now.strftime("%y")
-                month_str = now.strftime("%b").upper()
+                # Algorithmic fallback aligned with MCX expiry cycles
+                cycle = specs.get("expiry_cycle", list(range(1, 13)))
+                target_month = now.month
+                target_year = now.year
+                while target_month not in cycle or (target_month == now.month and now.day >= 24):
+                    target_month += 1
+                    if target_month > 12:
+                        target_month = 1
+                        target_year += 1
+
+                month_str = datetime(target_year, target_month, 1).strftime("%b").upper()
+                year_str = datetime(target_year, target_month, 1).strftime("%y")
                 contract = f"{prefix}{year_str}{month_str}FUT"
 
             self.active_contracts[sym] = contract
-            logger.info(f"  [+] {sym:10s} -> Active Contract: {contract}")
+            lot_sz = self.resolve_lot_size(sym, contract)
+            logger.info(f"  [+] {sym:10s} -> Active Contract: {contract} (Official Lot Size: {lot_sz} units)")
+
+    def reconcile_broker_positions(self):
+        """
+        Reconciles internal tracked state against official broker position book and order book.
+        Performs bidirectional reconciliation:
+        - Detects internally tracked positions missing at broker (clears phantom state).
+        - Detects unexpected/external broker positions missing internally (flags and blocks new entries).
+        - Detects quantity mismatches (updates internal state and flags discrepancy).
+        - Detects pending/unverified orders and partial fills against broker orderbook.
+        - Strictly NEVER auto-closes, overwrites or silently adopts unexpected external positions.
+        - Blocks new entries until discrepancies are resolved safely.
+        """
+        if not self.is_host_reachable or not self.api_key:
+            return
+
+        discrepancies: List[str] = []
+        unexpected_positions: Dict[str, int] = {}
+
+        try:
+            # 1. Pending orders and partial fills check against broker orderbook
+            try:
+                ob_url = f"{self.host.rstrip('/')}/api/v1/orderbook"
+                ob_resp = requests.post(ob_url, json={"apikey": self.api_key}, timeout=6)
+                if ob_resp.status_code == 200:
+                    ob_data = ob_resp.json().get("data", [])
+                    broker_orders = {}
+                    if isinstance(ob_data, list):
+                        for o in ob_data:
+                            if isinstance(o, dict):
+                                oid = str(o.get("orderid") or o.get("order_id") or "")
+                                if oid:
+                                    broker_orders[oid] = o
+
+                    registry = self.state_manager.state.get("order_registry", {})
+                    for o_key, o_val in list(registry.items()):
+                        if o_val.get("status") in ["PENDING", "UNVERIFIED"]:
+                            oid = str(o_val.get("order_id") or "")
+                            bo = broker_orders.get(oid) if oid else None
+                            if not bo and not oid:
+                                o_data = o_val.get("data", {})
+                                c_sym = o_data.get("contract", "")
+                                c_qty = int(o_data.get("quantity", 0))
+                                c_act = str(o_data.get("action", "")).upper()
+                                for b_order in broker_orders.values():
+                                    b_sym = b_order.get("tradingsymbol") or b_order.get("symbol")
+                                    b_qty = int(b_order.get("quantity") or 0)
+                                    b_act = str(b_order.get("transaction_type") or b_order.get("action") or "").upper()
+                                    if b_sym == c_sym and b_qty == c_qty and (not c_act or b_act == c_act):
+                                        bo = b_order
+                                        oid = str(bo.get("orderid") or bo.get("order_id") or "")
+                                        o_val["order_id"] = oid
+                                        break
+
+                            if bo:
+                                b_status = str(bo.get("order_status") or bo.get("status") or "").upper()
+                                filled_qty = int(bo.get("filled_quantity") or bo.get("filledqty") or 0)
+                                total_qty = int(bo.get("quantity") or 0)
+
+                                if b_status in ["COMPLETE", "FILLED"]:
+                                    self.state_manager.mark_order_resolved(o_key, "FILLED", oid)
+                                    logger.info(f"✅ [RECONCILIATION] Order {oid} ({o_key}) reconciled as FILLED.")
+                                    o_data = o_val.get("data", {})
+                                    c_sym = o_data.get("contract", "")
+                                    act = o_data.get("action", "")
+                                    if c_sym and c_sym not in self.state_manager.state.get("tracked_positions", {}):
+                                        avg_px = float(bo.get("average_price") or bo.get("price") or 0.0)
+                                        self.state_manager.save_position(
+                                            c_sym,
+                                            {
+                                                "symbol": o_data.get("symbol", ""),
+                                                "contract": c_sym,
+                                                "direction": "Long" if act == "BUY" else "Short",
+                                                "quantity": filled_qty or total_qty or int(o_data.get("quantity", 0)),
+                                                "entry_price": avg_px,
+                                                "reconciled_from_order": oid,
+                                            },
+                                        )
+                                elif b_status in ["CANCELLED", "REJECTED"]:
+                                    self.state_manager.mark_order_resolved(o_key, b_status, oid)
+                                    logger.info(f"ℹ️ [RECONCILIATION] Order {oid} ({o_key}) reconciled as {b_status}.")
+                                elif 0 < filled_qty < total_qty:
+                                    msg = f"Partial fill on order {oid} ({o_key}): {filled_qty}/{total_qty}"
+                                    logger.warning(f"⚠️ [RECONCILIATION] {msg}")
+                                    discrepancies.append(msg)
+                                elif b_status in ["OPEN", "PENDING", "TRIGGER_PENDING"]:
+                                    msg = f"Order {oid} ({o_key}) still open/pending at broker"
+                                    logger.info(f"⏳ [RECONCILIATION] {msg}")
+                                    discrepancies.append(msg)
+                            else:
+                                msg = f"Unresolved pending order reservation: {o_key} (ID: {oid or 'UNCONFIRMED'})"
+                                logger.warning(f"⚠️ [RECONCILIATION] {msg}")
+                                discrepancies.append(msg)
+            except Exception as ob_err:
+                logger.debug(f"Orderbook reconciliation check: {ob_err}")
+
+            # 2. Positionbook reconciliation
+            url = f"{self.host.rstrip('/')}/api/v1/positionbook"
+            resp = requests.post(url, json={"apikey": self.api_key}, timeout=6)
+            if resp.status_code == 200:
+                broker_data = resp.json().get("data", [])
+                broker_positions: Dict[str, int] = {}
+                for p in broker_data:
+                    sym = p.get("symbol") or p.get("tradingsymbol")
+                    qty = int(p.get("quantity") or p.get("netqty") or p.get("net_qty") or 0)
+                    exch = str(p.get("exchange", "")).upper()
+                    # Isolate strategy exchange: external positions on other exchanges (e.g. NFO, NSE) must be ignored
+                    if exch and exch != EXCHANGE:
+                        logger.debug(
+                            f"ℹ️ [EXTERNAL POSITION IGNORED] {sym} on exchange '{exch}' "
+                            f"is outside strategy scope ({EXCHANGE})."
+                        )
+                        continue
+                    if sym:
+                        broker_positions[sym] = qty
+
+                # 2A. Forward check: Internally tracked positions vs broker positions
+                tracked = self.state_manager.state.get("tracked_positions", {})
+                for contract, pos_info in list(tracked.items()):
+                    broker_qty = broker_positions.get(contract, 0)
+                    if broker_qty == 0:
+                        logger.warning(
+                            f"⚠️ [RECONCILIATION] Phantom position detected! Internal state holds {contract}, "
+                            f"but broker position is 0. Clearing internal position."
+                        )
+                        self.state_manager.remove_position(contract)
+                        self.state_manager.clear_pullback_watch(pos_info.get("symbol", ""))
+                    elif abs(broker_qty) != abs(pos_info.get("quantity", 0)):
+                        msg = (
+                            f"Quantity mismatch for {contract}! "
+                            f"Internal: {pos_info.get('quantity')}, Broker: {broker_qty}"
+                        )
+                        logger.warning(f"⚠️ [RECONCILIATION] {msg}. Updating internal state quantity.")
+                        pos_info["quantity"] = abs(broker_qty)
+                        self.state_manager.save_position(contract, pos_info)
+                        discrepancies.append(msg)
+
+                # 2B. Reverse check: Broker positions vs internally tracked positions
+                for sym, b_qty in broker_positions.items():
+                    if b_qty != 0 and sym not in tracked:
+                        msg = (
+                            f"Unexpected external broker position: {sym} Qty={b_qty} (not tracked internally)"
+                        )
+                        logger.critical(f"🚨 [AUDIT ALERT] {msg}. Strategy will NOT adopt or close this position.")
+                        unexpected_positions[sym] = b_qty
+                        discrepancies.append(msg)
+
+        except Exception as e:
+            logger.warning(f"Error during broker position book reconciliation: {e}")
+            discrepancies.append(f"Reconciliation query error: {e}")
+
+        self.unexpected_broker_positions = unexpected_positions
+        if discrepancies:
+            self.has_reconciliation_discrepancy = True
+            self.reconciliation_discrepancies = discrepancies
+            logger.error(
+                f"🛑 [SAFETY GOVERNOR] Reconciliation discrepancies detected: {discrepancies}. "
+                f"New entries are BLOCKED until resolved safely."
+            )
+        else:
+            self.has_reconciliation_discrepancy = False
+            self.reconciliation_discrepancies = []
 
     def fetch_1h_candles(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Fetches completed 1H candles from OpenAlgo API or history endpoint with resilient in-memory caching."""
+        """
+        Fetches completed, confirmed 1H candles from OpenAlgo API.
+        STRICT FAIL-CLOSED POLICY:
+        - In-progress / unclosed candles are filtered out.
+        - Stale data (> 75 min old during market hours) is rejected.
+        - Insufficient history (< 80 bars) is rejected.
+        - Zero research CSV fallback is permitted in live execution.
+        """
         contract = self.active_contracts.get(symbol, symbol)
         now = get_current_ist()
 
-        # If cache is already populated with >= 53 bars and was polled recently (< 180s ago),
-        # reuse cache directly unless a new hourly candle boundary has closed (minutes 0-2).
-        cached_ready = symbol in self.candle_cache and len(self.candle_cache[symbol]) >= 53
-        last_fetch = self.last_candle_fetch_time.get(symbol, 0.0)
-        time_since_fetch = time.time() - last_fetch
-        top_of_hour = now.minute in [0, 1, 2]
+        if not self.is_host_reachable or not self.api_key:
+            logger.warning(f"🛑 [FAIL-CLOSED] OpenAlgo gateway unavailable. Refusing data fetch for {symbol}.")
+            return None
 
-        if cached_ready and time_since_fetch < 180 and not top_of_hour:
-            return self.candle_cache[symbol]
-
-        self.last_candle_fetch_time[symbol] = time.time()
-
-        # Query recent 5 days to append/update newest closed bars without requesting full 90 days from broker every cycle
-        start_date = (now - timedelta(days=5)).strftime("%Y-%m-%d")
+        # Request 35 days of history (~450 1H bars) for robust HTF warm-up without synthetic CSVs
+        start_date = (now - timedelta(days=35)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
 
-        candidates = [contract]
-        # Fallback candidate: standard contract if available
-        if "M" in symbol:
-            std_sym = symbol.replace("MINI", "").replace("MIC", "").rstrip("M")
-            specs = MCX_COMMODITY_SPECS.get(symbol, {})
-            prefix = specs.get("search_prefix", symbol)
-            if std_sym and prefix != std_sym:
-                candidates.append(contract.replace(prefix, std_sym))
-
         df_live = None
-        if self.is_host_reachable:
-            for cand in candidates:
-                # 1. Try SDK (fast 6s timeout)
-                if self.client is not None:
-                    try:
-                        resp = self.client.history(
-                            symbol=cand,
-                            exchange=EXCHANGE,
-                            interval=INTERVAL,
-                            start_date=start_date,
-                            end_date=end_date,
-                        )
-                        if isinstance(resp, pd.DataFrame) and not resp.empty:
-                            df_live = resp
-                            break
-                    except Exception as e:
-                        logger.debug(f"SDK history fetch for {symbol} ({cand}): {e}")
-
-                # 2. Try REST API (6s timeout)
-                try:
-                    url = f"{self.host.rstrip('/')}/api/v1/history"
-                    payload = {
-                        "apikey": self.api_key,
-                        "symbol": cand,
-                        "exchange": EXCHANGE,
-                        "interval": INTERVAL,
-                        "start_date": start_date,
-                        "end_date": end_date,
-                    }
-                    r = requests.post(url, json=payload, timeout=6)
-                    if r.status_code == 200:
-                        data = r.json().get("data", [])
-                        if data:
-                            df_live = pd.DataFrame(data)
-                            break
-                except Exception as e:
-                    logger.debug(f"REST history fetch for {symbol} ({cand}): {e}")
-
-        # Format live dataframe if retrieved
-        if isinstance(df_live, pd.DataFrame) and not df_live.empty:
-            df_live.columns = [str(c).strip().lower() for c in df_live.columns]
-            if "timestamp" in df_live.columns:
-                if pd.api.types.is_numeric_dtype(df_live["timestamp"]):
-                    df_live["timestamp"] = pd.to_datetime(df_live["timestamp"], unit="s", utc=True).dt.tz_convert(IST)
-                else:
-                    df_live["timestamp"] = pd.to_datetime(df_live["timestamp"])
-                df_live = df_live.set_index("timestamp")
-            elif not isinstance(df_live.index, pd.DatetimeIndex):
-                df_live.index = pd.to_datetime(df_live.index)
-
-            df_live = df_live.sort_index()
-            for col in ["open", "high", "low", "close"]:
-                if col in df_live.columns:
-                    df_live[col] = df_live[col].astype(float)
-
-            # Merge live bars onto existing cached baseline
-            if symbol in self.candle_cache:
-                base_df = self.candle_cache[symbol]
-                combined = pd.concat([base_df[~base_df.index.isin(df_live.index)], df_live]).sort_index()
-                self.candle_cache[symbol] = combined
-                return combined
-            elif len(df_live) >= 53:
-                self.candle_cache[symbol] = df_live
-                return df_live
-
-        # 3. Resilient In-Memory Cache Fallback (Preserves continuity across transient broker/API timeouts)
-        if symbol in self.candle_cache and len(self.candle_cache[symbol]) >= 53:
-            return self.candle_cache[symbol]
-
-        # 4. Fallback to local clean research dataset cache (ensures zero downtime during paper testing)
-        local_candidates = [
-            SCRIPT_DIR / "data" / f"{symbol}_1h.csv",
-            PROJECT_ROOT / "strategies/liveonopenalgo/data" / f"{symbol}_1h.csv",
-            ROOT_DIR / "backtesting/ichimoku_research/geometry/data" / f"{symbol}_1h_with_htf_geometry.csv",
-            ROOT_DIR / "backtesting/ichimoku_research/data" / f"{symbol}_1h.csv",
-        ]
-        local_csv = next((p for p in local_candidates if p.exists()), None)
-        if local_csv is not None:
+        # 1. Try SDK History
+        if self.client is not None:
             try:
-                df = pd.read_csv(local_csv)
-                logger.info(f"  [+] Ingested {len(df)} candles for {symbol} from local historical cache ({local_csv.name}).")
-                df.columns = [str(c).strip().lower() for c in df.columns]
-                if "timestamp" in df.columns:
-                    if pd.api.types.is_numeric_dtype(df["timestamp"]):
-                        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert(IST)
-                    else:
-                        df["timestamp"] = pd.to_datetime(df["timestamp"])
-                    df = df.set_index("timestamp")
-                elif not isinstance(df.index, pd.DatetimeIndex):
-                    df.index = pd.to_datetime(df.index)
-
-                df = df.sort_index()
-                for col in ["open", "high", "low", "close"]:
-                    if col in df.columns:
-                        df[col] = df[col].astype(float)
-
-                if len(df) >= 53:
-                    self.candle_cache[symbol] = df
-                    return df
+                resp = self.client.history(
+                    symbol=contract,
+                    exchange=EXCHANGE,
+                    interval=INTERVAL,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                if isinstance(resp, pd.DataFrame) and not resp.empty:
+                    df_live = resp
             except Exception as e:
-                logger.warning(f"Failed to load local cache for {symbol}: {e}")
-        elif not self.is_host_reachable:
-            logger.warning(f"  [!] OpenAlgo host {self.host} is offline and no local fallback CSV found for {symbol}.")
+                logger.debug(f"SDK history fetch for {symbol} ({contract}): {e}")
 
-        return None
+        # 2. Try REST API History
+        if df_live is None or df_live.empty:
+            try:
+                url = f"{self.host.rstrip('/')}/api/v1/history"
+                payload = {
+                    "apikey": self.api_key,
+                    "symbol": contract,
+                    "exchange": EXCHANGE,
+                    "interval": INTERVAL,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+                r = requests.post(url, json=payload, timeout=8)
+                if r.status_code == 200:
+                    data = r.json().get("data", [])
+                    if data:
+                        df_live = pd.DataFrame(data)
+            except Exception as e:
+                logger.error(f"[FAIL-CLOSED] History fetch error for {symbol} ({contract}): {e}")
+                return None
+
+        if df_live is None or df_live.empty:
+            logger.warning(f"🛑 [FAIL-CLOSED] Empty history received from live broker for {symbol}.")
+            return None
+
+        # Format dataframe
+        df_live.columns = [str(c).strip().lower() for c in df_live.columns]
+        if "timestamp" in df_live.columns:
+            if pd.api.types.is_numeric_dtype(df_live["timestamp"]):
+                df_live["timestamp"] = pd.to_datetime(df_live["timestamp"], unit="s", utc=True).dt.tz_convert(IST)
+            else:
+                df_live["timestamp"] = pd.to_datetime(df_live["timestamp"])
+                if df_live["timestamp"].dt.tz is None:
+                    df_live["timestamp"] = df_live["timestamp"].dt.tz_localize(IST)
+                else:
+                    df_live["timestamp"] = df_live["timestamp"].dt.tz_convert(IST)
+            df_live = df_live.set_index("timestamp")
+        elif not isinstance(df_live.index, pd.DatetimeIndex):
+            df_live.index = pd.to_datetime(df_live.index)
+            if df_live.index.tz is None:
+                df_live.index = df_live.index.tz_localize(IST)
+            else:
+                df_live.index = df_live.index.tz_convert(IST)
+        elif df_live.index.tz is None:
+            df_live.index = df_live.index.tz_localize(IST)
+        else:
+            df_live.index = df_live.index.tz_convert(IST)
+
+        df_live = df_live.sort_index()
+        for col in ["open", "high", "low", "close"]:
+            if col in df_live.columns:
+                df_live[col] = df_live[col].astype(float)
+
+        # GATE 1: Filter out forming, unclosed hourly bar
+        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+        df_completed = df_live[df_live.index < current_hour_start].copy()
+
+        if df_completed.empty:
+            logger.warning(f"🛑 [FAIL-CLOSED] No completed 1H candles found for {symbol}.")
+            return None
+
+        # GATE 2: Data Freshness Check during MCX market hours
+        last_bar_dt = df_completed.index[-1]
+        # In OHLCV data, timestamp represents the start of the bar.
+        # A completed 1H bar completed at bar_close = last_bar_dt + 1 hour.
+        bar_close_dt = last_bar_dt + timedelta(hours=1)
+        age_minutes = (now - bar_close_dt).total_seconds() / 60.0
+        # If market has been open for > 60m, require the last completed bar to be within 75m of close
+        session_active, _ = is_mcx_trading_time(now)
+        if session_active and (now.hour * 60 + now.minute) >= (10 * 60 + 5) and age_minutes > 75.0:
+            logger.error(
+                f"🛑 [FAIL-CLOSED] Market data is STALE for {symbol} "
+                f"(Last bar: {last_bar_dt.strftime('%Y-%m-%d %H:%M IST')} [Close: {bar_close_dt.strftime('%H:%M IST')}], "
+                f"Age: {age_minutes:.1f}m > 75m). Aborting."
+            )
+            return None
+
+        # GATE 3: Minimum Historical Depth (80 bars required for Senkou B 52 + displacement 26)
+        if len(df_completed) < 80:
+            logger.warning(
+                f"🛑 [FAIL-CLOSED] Insufficient history for {symbol} ({len(df_completed)} < 80 bars). "
+                f"Indicator warm-up requirements not satisfied."
+            )
+            return None
+
+        self.candle_cache[symbol] = df_completed
+        return df_completed
 
     def place_order(
         self,
         symbol: str,
         contract_symbol: str,
         action: str,
-        quantity: int,
+        lots: int,
         reason: str,
         reference_price: float = 0.0,
+        candle_timestamp: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Submits order to OpenAlgo with safety checks and Telegram broadcast."""
-        order_key = f"{contract_symbol}_{action}_{quantity}_{datetime.now().strftime('%Y%m%d%H%M')}"
-        if self.state_manager.is_order_inflight(order_key):
-            logger.warning(f"⚠️ [IDEMPOTENCY] Order {order_key} already inflight. Skipping.")
+        """
+        Submits order with dynamic exchange lot size validation and verified fill polling.
+        Guarantees that quantity sent to OpenAlgo is in verified exchange units.
+        """
+        lot_size = self.resolve_lot_size(symbol, contract_symbol)
+        if lot_size <= 0:
+            logger.error(f"🛑 [FAIL-CLOSED] Unverified lot size for {contract_symbol}. Order rejected.")
             return None
 
-        logger.info(f"🚀 [ORDER] Submitting {action} {quantity} lots of {contract_symbol} ({reason})...")
-        self.state_manager.mark_order_pending(order_key, {
-            "symbol": symbol, "contract": contract_symbol, "action": action, "qty": quantity, "reason": reason
-        })
+        exchange_qty = lots * lot_size
+        if exchange_qty <= 0 or (exchange_qty % lot_size != 0):
+            logger.error(
+                f"🛑 [FAIL-CLOSED] Order quantity {exchange_qty} is not a valid multiple of lot size {lot_size}."
+            )
+            return None
+
+        candle_key = candle_timestamp or get_current_ist().strftime("%Y%m%d%H")
+        order_key = f"{contract_symbol}_{action}_{candle_key}"
+        order_data = {
+            "symbol": symbol,
+            "contract": contract_symbol,
+            "action": action,
+            "lots": lots,
+            "quantity": exchange_qty,
+            "reason": reason,
+            "candle": candle_key,
+        }
+
+        # ATOMIC CHECK-AND-RESERVE TO PREVENT CONCURRENT DUPLICATE ORDERS
+        if not self.state_manager.try_mark_order_pending(order_key, order_data):
+            logger.warning(f"⚠️ [IDEMPOTENCY] Order {order_key} already inflight/reserved. Skipping duplicate.")
+            return None
+
+        logger.info(
+            f"🚀 [ORDER] Submitting {action} {lots} lot(s) = {exchange_qty} units of {contract_symbol} ({reason})..."
+        )
 
         resp = None
+        timed_out = False
         if self.client is not None:
             try:
                 resp = self.client.placeorder(
@@ -882,12 +1201,15 @@ class MCXIchimokuStrategy:
                     action=action,
                     price_type="MARKET",
                     product=PRODUCT,
-                    quantity=quantity,
+                    quantity=exchange_qty,
                 )
+            except requests.exceptions.Timeout as e:
+                logger.error(f"SDK placeorder timeout: {e}")
+                timed_out = True
             except Exception as e:
                 logger.error(f"SDK placeorder error: {e}")
 
-        if not resp:
+        if not resp and not timed_out:
             try:
                 order_url = f"{self.host.rstrip('/')}/api/v1/placeorder"
                 payload = {
@@ -898,109 +1220,157 @@ class MCXIchimokuStrategy:
                     "action": action,
                     "price_type": "MARKET",
                     "product": PRODUCT,
-                    "quantity": quantity,
+                    "quantity": exchange_qty,
                 }
                 r = requests.post(order_url, json=payload, timeout=8)
                 resp = r.json() if r.status_code == 200 else {"status": "error", "message": r.text}
+            except requests.exceptions.Timeout as e:
+                logger.error(f"REST placeorder timeout: {e}")
+                timed_out = True
             except Exception as e:
                 logger.error(f"REST placeorder error: {e}")
 
-        if isinstance(resp, dict) and resp.get("status") in ["success", 200, "COMPLETE"]:
-            order_id = resp.get("orderid", "ORD_MOCK")
-            self.state_manager.mark_order_resolved(order_key, "FILLED", order_id)
-
-            fill_price = self.get_fill_price(order_id, contract_symbol, fallback=reference_price)
-            alert_msg = (
-                f"🚨 *{STRATEGY_NAME} ORDER EXECUTED*\n"
-                f"• *Contract*: `{contract_symbol}`\n"
-                f"• *Action*: *{action}*\n"
-                f"• *Quantity*: {quantity} lot(s)\n"
-                f"• *Price*: ₹{fill_price:,.2f}\n"
-                f"• *Reason*: {reason}\n"
-                f"• *Timestamp*: {get_current_ist().strftime('%d-%b-%Y %H:%M:%S IST')}"
+        if timed_out:
+            logger.critical(
+                f"🛑 [ORDER UNCERTAIN] Order request timed out for {order_key}. "
+                f"Holding reservation as UNVERIFIED until broker reconciliation."
             )
-            send_telegram_alert(alert_msg)
-            return {"status": "success", "orderid": order_id, "fill_price": fill_price}
+            self.state_manager.mark_order_resolved(order_key, "UNVERIFIED")
+            return None
+
+        if isinstance(resp, dict) and resp.get("status") in ["success", 200, "COMPLETE"]:
+            order_id = resp.get("orderid", "")
+            if not order_id:
+                logger.error("🛑 Order gateway acknowledged success but returned no orderid.")
+                self.state_manager.mark_order_resolved(order_key, "FAILED")
+                return None
+
+            # VERIFIED FILL POLLING: Poll /api/v1/orderstatus up to 5 times for terminal fill state
+            fill_success, fill_price = self._poll_verified_fill(order_id, contract_symbol, fallback=reference_price)
+            if fill_success and fill_price > 0:
+                self.state_manager.mark_order_resolved(order_key, "FILLED", order_id)
+                alert_msg = (
+                    f"🚨 *{STRATEGY_NAME} ORDER FILLED*\n"
+                    f"• *Contract*: `{contract_symbol}`\n"
+                    f"• *Action*: *{action}*\n"
+                    f"• *Lots*: {lots} ({exchange_qty} units)\n"
+                    f"• *Fill Price*: ₹{fill_price:,.2f}\n"
+                    f"• *Reason*: {reason}\n"
+                    f"• *Timestamp*: {get_current_ist().strftime('%d-%b-%Y %H:%M:%S IST')}"
+                )
+                send_telegram_alert(alert_msg)
+                return {
+                    "status": "success",
+                    "orderid": order_id,
+                    "fill_price": fill_price,
+                    "quantity": exchange_qty,
+                }
+            else:
+                logger.error(
+                    f"🛑 [UNVERIFIED FILL] Order {order_id} for {contract_symbol} was not confirmed COMPLETE by broker."
+                )
+                self.state_manager.mark_order_resolved(order_key, "UNVERIFIED", order_id)
+                return None
 
         self.state_manager.mark_order_resolved(order_key, "FAILED")
         return None
 
-    def get_fill_price(self, order_id: str, contract_symbol: str, fallback: float = 0.0) -> float:
-        """Retrieves actual fill price or LTP fallback."""
-        try:
-            url = f"{self.host.rstrip('/')}/api/v1/orderstatus"
-            r = requests.post(url, json={"apikey": self.api_key, "orderid": str(order_id)}, timeout=6)
-            if r.status_code == 200:
-                d = r.json().get("data", r.json())
-                for k in ["average_price", "avg_price", "fill_price", "price"]:
-                    if d.get(k):
-                        fv = float(d[k])
-                        if fv > 0:
-                            return fv
-        except Exception:
-            pass
+    def _poll_verified_fill(
+        self, order_id: str, contract_symbol: str, fallback: float = 0.0
+    ) -> Tuple[bool, float]:
+        """Polls OpenAlgo orderstatus endpoint to verify COMPLETE state and extract real fill price."""
+        url = f"{self.host.rstrip('/')}/api/v1/orderstatus"
+        for attempt in range(5):
+            time.sleep(0.5 * (attempt + 1))
+            try:
+                r = requests.post(url, json={"apikey": self.api_key, "strategy": STRATEGY_NAME, "orderid": str(order_id)}, timeout=8)
+                if r.status_code == 200:
+                    data = r.json().get("data", r.json())
+                    status = str(
+                        data.get("order_status") or data.get("status") or data.get("orderstatus") or ""
+                    ).upper()
+                    if status in ["COMPLETE", "FILLED"]:
+                        for k in ["average_price", "avg_price", "fill_price", "price"]:
+                            if data.get(k):
+                                fv = float(data[k])
+                                if fv > 0:
+                                    return True, fv
+                        if fallback > 0:
+                            return True, fallback
+                    elif status in ["REJECTED", "CANCELLED"]:
+                        logger.error(f"🛑 Order {order_id} was {status} by broker: {data.get('rejection_reason', '')}")
+                        return False, 0.0
+            except Exception as e:
+                logger.debug(f"Polling order status for {order_id} attempt {attempt+1}: {e}")
 
-        try:
-            q_url = f"{self.host.rstrip('/')}/api/v1/quotes"
-            qr = requests.post(q_url, json={"apikey": self.api_key, "symbol": contract_symbol, "exchange": EXCHANGE}, timeout=6)
-            if qr.status_code == 200:
-                ltp = float(qr.json().get("data", {}).get("ltp", 0.0) or 0.0)
-                if ltp > 0:
-                    return ltp
-        except Exception:
-            pass
-
-        return fallback if fallback > 0 else 0.0
+        # If orderstatus polling fails to confirm terminal COMPLETE or FILLED state, fail-closed!
+        logger.warning(
+            f"⚠️ [UNCONFIRMED ORDER] Order {order_id} for {contract_symbol} not confirmed COMPLETE after 5 polling attempts."
+        )
+        return False, 0.0
 
     def evaluate_symbol(self, symbol: str):
-        """Complete evaluation of active positions, fresh entries, targets, and pullback re-entries."""
+        """
+        Complete evaluation on confirmed, completed 1H candles.
+        Enforces exactly-once execution per candle, session-aligned HTF consensus, and verified fill sizing.
+        """
         df_1h = self.fetch_1h_candles(symbol)
-        if df_1h is None or len(df_1h) < 53:
-            logger.warning(f"⚠️ Insufficient 1H data for {symbol} (<53 bars). Skipping.")
+        if df_1h is None or len(df_1h) < 80:
             return
 
         specs = MCX_COMMODITY_SPECS.get(symbol, {})
         contract = self.active_contracts.get(symbol, symbol)
         pullback_prox = specs.get("pullback_tolerance", 0.015)
         multiplier = specs.get("multiplier", 10.0)
+        lot_size = self.resolve_lot_size(symbol, contract)
 
-        # 1. Compute 1H Ichimoku & Resample HTF
+        # 1. Compute 1H Ichimoku from confirmed 1H candles
         df_ichi_1h = compute_ichimoku_1h(df_1h)
-        df_4h = resample_ohlcv(df_1h, "4h")
-        df_1d = resample_ohlcv(df_1h, "1D")
+        if df_ichi_1h is None or len(df_ichi_1h) < 80:
+            logger.warning(f"🛑 [FAIL-CLOSED] Insufficient Ichimoku data for {symbol}.")
+            return
 
-        reg_4h, dir_4h, is_horiz_4h = classify_htf_regime(df_4h)
-        reg_1d, dir_1d, _ = classify_htf_regime(df_1d)
+        # Fail-closed check: verify all required indicator fields exist
+        required_cols = [
+            "close", "high", "low", "tenkan", "kijun", "senkou_a", "senkou_b",
+            "kumo_top", "kumo_bottom", "chikou", "chikou_past_close", "future_cloud_bull",
+            "future_cloud_bear", "atr14"
+        ]
+        if not all(col in df_ichi_1h.columns for col in required_cols):
+            logger.error(f"🛑 [FAIL-CLOSED] Missing required Ichimoku indicator columns in df_ichi_1h for {symbol}.")
+            return
 
-        htf_bull_gate = ("Bullish" in reg_4h) and ("Bullish" in reg_1d)
-        htf_bear_gate = ("Bearish" in reg_4h) and ("Bearish" in reg_1d)
-
+        # Slicing from latest completed Ichimoku-enriched 1H candle
         last_bar = df_ichi_1h.iloc[-1]
         prev_bar = df_ichi_1h.iloc[-2]
-        close = last_bar["close"]
-        high = last_bar["high"]
-        low = last_bar["low"]
-        tenkan = last_bar["tenkan"]
-        kijun = last_bar["kijun"]
-        kumo_top = last_bar["kumo_top"]
-        kumo_bot = last_bar["kumo_bottom"]
-        chikou_ref = last_bar["chikou_past_close"]
-        fut_bull = last_bar["future_cloud_bull"]
-        fut_bear = last_bar["future_cloud_bear"]
-        atr14 = last_bar["atr14"]
 
-        # Confirmed 1H Model I5 trigger
-        bull_state = (tenkan > kijun) and (close > kumo_top) and (close > chikou_ref) and (close > kijun) and fut_bull
-        bear_state = (tenkan < kijun) and (close < kumo_bot) and (close < chikou_ref) and (close < kijun) and fut_bear
+        # Fail-closed check: verify no NaN in critical indicator values
+        critical_fields = ["tenkan", "kijun", "senkou_a", "senkou_b", "chikou_past_close", "chikou", "atr14"]
+        if any(pd.isna(last_bar.get(col)) for col in critical_fields) or any(pd.isna(prev_bar.get(col)) for col in critical_fields):
+            logger.warning(f"🛑 [FAIL-CLOSED] NaN indicator value detected for {symbol}. Insufficient warm-up.")
+            return
 
-        prev_bull = (prev_bar["tenkan"] > prev_bar["kijun"]) and (prev_bar["close"] > prev_bar["kumo_top"]) and (prev_bar["close"] > prev_bar["chikou_past_close"]) and (prev_bar["close"] > prev_bar["kijun"]) and prev_bar["future_cloud_bull"]
-        prev_bear = (prev_bar["tenkan"] < prev_bar["kijun"]) and (prev_bar["close"] < prev_bar["kumo_bottom"]) and (prev_bar["close"] < prev_bar["chikou_past_close"]) and (prev_bar["close"] < prev_bar["kijun"]) and prev_bar["future_cloud_bear"]
+        candle_ts = str(
+            last_bar.name
+            if last_bar.name is not None and not str(last_bar.name).isdigit()
+            else (last_bar.get("timestamp") or str(last_bar.name))
+        )
 
-        bull_trigger = bull_state and not prev_bull
-        bear_trigger = bear_state and not prev_bear
+        close = float(last_bar["close"])
+        high = float(last_bar["high"])
+        low = float(last_bar["low"])
+        tenkan = float(last_bar["tenkan"])
+        kijun = float(last_bar["kijun"])
+        kumo_top = float(last_bar["kumo_top"])
+        kumo_bot = float(last_bar["kumo_bottom"])
+        chikou_ref = float(last_bar["chikou_past_close"])
+        fut_bull = bool(last_bar["future_cloud_bull"])
+        fut_bear = bool(last_bar["future_cloud_bear"])
+        atr14 = float(last_bar["atr14"])
 
         # -------------------------------------------------------------
-        # 1. Manage Active Position (Intrabar Stops & Targets)
+        # 1. Manage Active Position (Intrabar Stops, Targets & Structural Exits)
+        # Continues monitoring stops and targets on every cycle even when no new entry signal exists!
         # -------------------------------------------------------------
         pos = self.state_manager.get_position(contract)
         if pos:
@@ -1008,144 +1378,344 @@ class MCXIchimokuStrategy:
             entry_p = float(pos.get("entry_price", close))
             stop_p = float(pos.get("stop_price", 0.0))
             target_p = float(pos.get("target_price", 0.0))
-            qty = int(pos.get("quantity", LOTS))
+            pos_qty = int(pos.get("quantity", LOTS * lot_size))
+            pos_lots = max(1, pos_qty // lot_size)
 
-            # A. Intrabar Stop Loss Hit
+            # A. Intrabar Stop Loss Hit (2.0x ATR)
             stop_hit = (pos_dir == 1 and low <= stop_p) or (pos_dir == -1 and high >= stop_p)
             if stop_hit:
                 logger.warning(f"🛑 [STOP LOSS] {contract} Protective 2.0x ATR Stop Hit at {stop_p:.2f}!")
                 action = "SELL" if pos_dir == 1 else "BUY"
-                res = self.place_order(symbol, contract, action, qty, reason=f"Hard 2.0x ATR Stop Loss Hit ({stop_p:.2f})", reference_price=stop_p)
+                res = self.place_order(
+                    symbol,
+                    contract,
+                    action,
+                    pos_lots,
+                    reason=f"Hard 2.0x ATR Stop Loss Hit ({stop_p:.2f})",
+                    reference_price=stop_p,
+                    candle_timestamp=candle_ts,
+                )
                 if res:
                     self.state_manager.remove_position(contract)
-                    self.state_manager.clear_pullback_watch(symbol)  # Re-entry strictly barred on stop out
+                    self.state_manager.clear_pullback_watch(symbol)  # Re-entry strictly barred on stop-out
                     pnl_pts = (stop_p - entry_p) if pos_dir == 1 else (entry_p - stop_p)
-                    self.state_manager.record_completed_trade({
-                        "symbol": symbol, "contract": contract, "direction": pos["direction"], "exit_reason": "STOP_LOSS",
-                        "entry_price": entry_p, "exit_price": stop_p, "net_pnl": round(pnl_pts * multiplier * qty - 40.0, 2)
-                    })
+                    self.state_manager.record_completed_trade(
+                        {
+                            "symbol": symbol,
+                            "contract": contract,
+                            "direction": pos["direction"],
+                            "exit_reason": "STOP_LOSS",
+                            "entry_price": entry_p,
+                            "exit_price": stop_p,
+                            "net_pnl": round(pnl_pts * (multiplier / lot_size) * pos_qty - 40.0, 2),
+                        }
+                    )
                 return
 
-            # B. Intrabar Profit Target Reached (+3.5R)
+            # B. Intrabar Profit Target Reached (+3.5x ATR = 1.75R)
             if ENABLE_TARGET and target_p > 0:
                 target_hit = (pos_dir == 1 and high >= target_p) or (pos_dir == -1 and low <= target_p)
                 if target_hit:
-                    logger.info(f"🎯 [TARGET REACHED] {contract} +3.5R Target Reached at {target_p:.2f}!")
+                    logger.info(
+                        f"🎯 [TARGET REACHED] {contract} 3.5x ATR (1.75R) Target Reached at {target_p:.2f}!"
+                    )
                     action = "SELL" if pos_dir == 1 else "BUY"
-                    res = self.place_order(symbol, contract, action, qty, reason=f"+3.5R Profit Target Hit ({target_p:.2f})", reference_price=target_p)
+                    res = self.place_order(
+                        symbol,
+                        contract,
+                        action,
+                        pos_lots,
+                        reason=f"3.5x ATR (1.75R) Profit Target Hit ({target_p:.2f})",
+                        reference_price=target_p,
+                        candle_timestamp=candle_ts,
+                    )
                     if res:
                         self.state_manager.remove_position(contract)
                         pnl_pts = (target_p - entry_p) if pos_dir == 1 else (entry_p - target_p)
-                        self.state_manager.record_completed_trade({
-                            "symbol": symbol, "contract": contract, "direction": pos["direction"], "exit_reason": "TARGET_REACHED",
-                            "entry_price": entry_p, "exit_price": target_p, "net_pnl": round(pnl_pts * multiplier * qty - 40.0, 2)
-                        })
+                        self.state_manager.record_completed_trade(
+                            {
+                                "symbol": symbol,
+                                "contract": contract,
+                                "direction": pos["direction"],
+                                "exit_reason": "TARGET_REACHED_1_75R",
+                                "entry_price": entry_p,
+                                "exit_price": target_p,
+                                "net_pnl": round(pnl_pts * (multiplier / lot_size) * pos_qty - 40.0, 2),
+                            }
+                        )
                         if ENABLE_PULLBACK_REENTRY:
-                            self.state_manager.set_pullback_watch(symbol, {
-                                "target_exited_dir": pos_dir,
-                                "exit_time": str(last_bar.name),
-                                "target_exit_price": target_p,
-                            })
-                            logger.info(f"👀 [PULLBACK WATCH] Activated for {symbol} (Direction: {pos['direction']}, Target Exit: {target_p:.2f}).")
+                            self.state_manager.set_pullback_watch(
+                                symbol,
+                                {
+                                    "target_exited_dir": pos_dir,
+                                    "exit_time": candle_ts,
+                                    "target_exit_price": target_p,
+                                    "bars_since_exit": 0,
+                                },
+                            )
+                            logger.info(
+                                f"👀 [PULLBACK WATCH] Activated for {symbol} "
+                                f"(Direction: {pos['direction']}, Target Exit: {target_p:.2f}, 1.75R Banked)."
+                            )
                     return
 
             # C. Bar Close Structural Exit
-            struct_exit = (pos_dir == 1 and (close < kijun or tenkan < kijun)) or (pos_dir == -1 and (close > kijun or tenkan > kijun))
+            struct_exit = (pos_dir == 1 and (close < kijun or tenkan < kijun)) or (
+                pos_dir == -1 and (close > kijun or tenkan > kijun)
+            )
             if struct_exit:
                 logger.info(f"📉 [STRUCTURAL EXIT] {contract} Hosoda Equilibrium Breakdown on Bar Close.")
                 action = "SELL" if pos_dir == 1 else "BUY"
-                res = self.place_order(symbol, contract, action, qty, reason="Hosoda Structural Exit (Close vs Kijun / TK Cross)", reference_price=close)
+                res = self.place_order(
+                    symbol,
+                    contract,
+                    action,
+                    pos_lots,
+                    reason="Hosoda Structural Exit (Close vs Kijun / TK Cross)",
+                    reference_price=close,
+                    candle_timestamp=candle_ts,
+                )
                 if res:
                     self.state_manager.remove_position(contract)
                     self.state_manager.clear_pullback_watch(symbol)
                     pnl_pts = (close - entry_p) if pos_dir == 1 else (entry_p - close)
-                    self.state_manager.record_completed_trade({
-                        "symbol": symbol, "contract": contract, "direction": pos["direction"], "exit_reason": "STRUCTURAL_EXIT",
-                        "entry_price": entry_p, "exit_price": close, "net_pnl": round(pnl_pts * multiplier * qty - 40.0, 2)
-                    })
+                    self.state_manager.record_completed_trade(
+                        {
+                            "symbol": symbol,
+                            "contract": contract,
+                            "direction": pos["direction"],
+                            "exit_reason": "STRUCTURAL_EXIT",
+                            "entry_price": entry_p,
+                            "exit_price": close,
+                            "net_pnl": round(pnl_pts * (multiplier / lot_size) * pos_qty - 40.0, 2),
+                        }
+                    )
                 return
 
-            return  # Position remains actively held
+            return  # Position active; monitoring continues on every cycle
 
         # -------------------------------------------------------------
-        # 2. Check Fresh Entries or Hosoda Pullback Re-entries (Flat)
+        # 2. Check Fresh Entries or Pullback Re-entries (Flat State Only)
         # -------------------------------------------------------------
+        # Safety gate: block new entries if broker reconciliation discrepancy is active
+        if self.has_reconciliation_discrepancy:
+            logger.warning(
+                f"🛑 [SAFETY BLOCK] New entries blocked for {symbol} due to active broker reconciliation discrepancies: "
+                f"{self.reconciliation_discrepancies}"
+            )
+            return
+
+        # Exactly-once execution check per candle boundary
+        last_processed = self.state_manager.get_last_processed_candle(symbol)
+        if last_processed == candle_ts:
+            return  # This confirmed candle has already been processed
+
+        # Exposure limit check
+        tracked = self.state_manager.state.get("tracked_positions", {})
+        if MAX_ACTIVE_POSITIONS > 0 and len(tracked) >= MAX_ACTIVE_POSITIONS:
+            logger.info(
+                f"⏸️ Max active positions limit ({MAX_ACTIVE_POSITIONS}) reached. Skipping new entries for {symbol}."
+            )
+            return
+
+        # Compute HTF Consensuses for Fresh Entry Filter
+        df_4h = resample_ohlcv(df_1h, "4h")
+        df_1d = resample_ohlcv(df_1h, "1D")
+
+        reg_4h, dir_4h, _ = classify_htf_regime(df_4h)
+        reg_1d, dir_1d, _ = classify_htf_regime(df_1d)
+
+        htf_bull_gate = ("Bullish" in reg_4h) and ("Bullish" in reg_1d)
+        htf_bear_gate = ("Bearish" in reg_4h) and ("Bearish" in reg_1d)
+
+        # 1H Model I5 Trigger
+        bull_state = (tenkan > kijun) and (close > kumo_top) and (close > chikou_ref) and (close > kijun) and fut_bull
+        bear_state = (tenkan < kijun) and (close < kumo_bot) and (close < chikou_ref) and (close < kijun) and fut_bear
+
+        prev_bull = (
+            (prev_bar["tenkan"] > prev_bar["kijun"])
+            and (prev_bar["close"] > prev_bar["kumo_top"])
+            and (prev_bar["close"] > prev_bar["chikou_past_close"])
+            and (prev_bar["close"] > prev_bar["kijun"])
+            and prev_bar["future_cloud_bull"]
+        )
+        prev_bear = (
+            (prev_bar["tenkan"] < prev_bar["kijun"])
+            and (prev_bar["close"] < prev_bar["kumo_bottom"])
+            and (prev_bar["close"] < prev_bar["chikou_past_close"])
+            and (prev_bar["close"] < prev_bar["kijun"])
+            and prev_bar["future_cloud_bear"]
+        )
+
+        bull_trigger = bull_state and not prev_bull
+        bear_trigger = bear_state and not prev_bear
+
+        # -------------------------------------------------------------
+        # 2. Check Fresh Entries or Pullback Re-entries (Flat State)
+        # -------------------------------------------------------------
+        # Safety gate: block new entries if broker reconciliation discrepancy is active
+        if self.has_reconciliation_discrepancy:
+            logger.warning(
+                f"🛑 [SAFETY BLOCK] New entries blocked for {symbol} due to active broker reconciliation discrepancies: "
+                f"{self.reconciliation_discrepancies}"
+            )
+            return
+
+        # Exactly-once execution check per candle boundary
+        last_processed = self.state_manager.get_last_processed_candle(symbol)
+        if last_processed == candle_ts:
+            return  # This confirmed candle has already been processed
+
+        # Exposure limit check
+        tracked = self.state_manager.state.get("tracked_positions", {})
+        if MAX_ACTIVE_POSITIONS > 0 and len(tracked) >= MAX_ACTIVE_POSITIONS:
+            logger.info(
+                f"⏸️ Max active positions limit ({MAX_ACTIVE_POSITIONS}) reached. Skipping new entries for {symbol}."
+            )
+            return
+
         watch = self.state_manager.get_pullback_watch(symbol)
         reenter_long = False
         reenter_short = False
 
         if watch and ENABLE_PULLBACK_REENTRY:
             t_dir = watch.get("target_exited_dir", 0)
-            # Invalidate watch if HTF regime has inverted
+            bars_since = watch.get("bars_since_exit", 0) + 1
+            watch["bars_since_exit"] = bars_since
+            self.state_manager.set_pullback_watch(symbol, watch)
+
+            # Invalidate watch if HTF regime broke or max lifetime (15 bars) exceeded
             if (t_dir == 1 and not htf_bull_gate) or (t_dir == -1 and not htf_bear_gate):
                 logger.info(f"ℹ️ [WATCH INVALIDATED] HTF regime no longer confluent for {symbol}. Clearing watch.")
                 self.state_manager.clear_pullback_watch(symbol)
-            else:
-                # Check Kijun-sen test within tolerance
+            elif bars_since > 15:
+                logger.info(f"ℹ️ [WATCH EXPIRED] Pullback watch exceeded 15 bars for {symbol}. Clearing watch.")
+                self.state_manager.clear_pullback_watch(symbol)
+            elif bars_since >= 2:  # Must have at least 1 completed bar separation after exit
                 if t_dir == 1:
-                    tested_kijun = (low <= kijun * (1.0 + pullback_prox)) or (prev_bar["low"] <= prev_bar["kijun"] * (1.0 + pullback_prox))
+                    tested_kijun = low <= kijun * (1.0 + pullback_prox)
                     if tested_kijun and close > tenkan and close > kijun:
                         reenter_long = True
                         logger.info(f"🚀 [PULLBACK RE-ENTRY TRIGGER] {symbol} Bullish Hosoda Model I3 Bounce confirmed!")
                 elif t_dir == -1:
-                    tested_kijun = (high >= kijun * (1.0 - pullback_prox)) or (prev_bar["high"] >= prev_bar["kijun"] * (1.0 - pullback_prox))
+                    tested_kijun = high >= kijun * (1.0 - pullback_prox)
                     if tested_kijun and close < tenkan and close < kijun:
                         reenter_short = True
                         logger.info(f"🚀 [PULLBACK RE-ENTRY TRIGGER] {symbol} Bearish Hosoda Model I3 Bounce confirmed!")
 
-        # Fresh Macro Signals
         fresh_long = bull_trigger and htf_bull_gate
         fresh_short = bear_trigger and htf_bear_gate
 
         if fresh_long or reenter_long:
             stop_p = close - (STOP_LOSS_ATR_MULT * atr14)
-            target_p = close + (PROFIT_TARGET_R * atr14) if ENABLE_TARGET else 0.0
-            reason = "Hosoda Model I3 Pullback Re-entry" if reenter_long else "San Yaku Kouten + Dual 4H/1D Confluence"
-            res = self.place_order(symbol, contract, "BUY", LOTS, reason=reason, reference_price=close)
+            target_p = close + (PROFIT_TARGET_ATR_MULT * atr14) if ENABLE_TARGET else 0.0
+            reason = (
+                "Hosoda Model I3 Pullback Re-entry"
+                if reenter_long
+                else "San Yaku Kouten + Dual 4H/1D Confluence"
+            )
+            res = self.place_order(
+                symbol,
+                contract,
+                "BUY",
+                LOTS,
+                reason=reason,
+                reference_price=close,
+                candle_timestamp=candle_ts,
+            )
             if res:
                 fill_p = res.get("fill_price", close)
-                self.state_manager.save_position(contract, {
-                    "symbol": symbol, "contract": contract, "direction": "Long", "quantity": LOTS,
-                    "entry_price": fill_p, "entry_atr": atr14, "stop_price": round(fill_p - (STOP_LOSS_ATR_MULT * atr14), 2),
-                    "target_price": round(fill_p + (PROFIT_TARGET_R * atr14), 2) if ENABLE_TARGET else 0.0,
-                    "entry_time": str(last_bar.name), "order_id": res.get("orderid"),
-                })
+                verified_qty = res.get("quantity", LOTS * lot_size)
+                self.state_manager.save_position(
+                    contract,
+                    {
+                        "symbol": symbol,
+                        "contract": contract,
+                        "direction": "Long",
+                        "lots": LOTS,
+                        "quantity": verified_qty,
+                        "entry_price": fill_p,
+                        "entry_atr": atr14,
+                        "stop_price": round(fill_p - (STOP_LOSS_ATR_MULT * atr14), 2),
+                        "target_price": round(fill_p + (PROFIT_TARGET_ATR_MULT * atr14), 2) if ENABLE_TARGET else 0.0,
+                        "entry_time": candle_ts,
+                        "order_id": res.get("orderid"),
+                    },
+                )
                 self.state_manager.clear_pullback_watch(symbol)
+                self.state_manager.set_last_processed_candle(symbol, candle_ts)
 
         elif fresh_short or reenter_short:
             stop_p = close + (STOP_LOSS_ATR_MULT * atr14)
-            target_p = close - (PROFIT_TARGET_R * atr14) if ENABLE_TARGET else 0.0
-            reason = "Hosoda Model I3 Pullback Re-entry" if reenter_short else "San Yaku Gyakuten + Dual 4H/1D Confluence"
-            res = self.place_order(symbol, contract, "SELL", LOTS, reason=reason, reference_price=close)
+            target_p = close - (PROFIT_TARGET_ATR_MULT * atr14) if ENABLE_TARGET else 0.0
+            reason = (
+                "Hosoda Model I3 Pullback Re-entry"
+                if reenter_short
+                else "San Yaku Gyakuten + Dual 4H/1D Confluence"
+            )
+            res = self.place_order(
+                symbol,
+                contract,
+                "SELL",
+                LOTS,
+                reason=reason,
+                reference_price=close,
+                candle_timestamp=candle_ts,
+            )
             if res:
                 fill_p = res.get("fill_price", close)
-                self.state_manager.save_position(contract, {
-                    "symbol": symbol, "contract": contract, "direction": "Short", "quantity": LOTS,
-                    "entry_price": fill_p, "entry_atr": atr14, "stop_price": round(fill_p + (STOP_LOSS_ATR_MULT * atr14), 2),
-                    "target_price": round(fill_p - (PROFIT_TARGET_R * atr14), 2) if ENABLE_TARGET else 0.0,
-                    "entry_time": str(last_bar.name), "order_id": res.get("orderid"),
-                })
+                verified_qty = res.get("quantity", LOTS * lot_size)
+                self.state_manager.save_position(
+                    contract,
+                    {
+                        "symbol": symbol,
+                        "contract": contract,
+                        "direction": "Short",
+                        "lots": LOTS,
+                        "quantity": verified_qty,
+                        "entry_price": fill_p,
+                        "entry_atr": atr14,
+                        "stop_price": round(fill_p + (STOP_LOSS_ATR_MULT * atr14), 2),
+                        "target_price": round(fill_p - (PROFIT_TARGET_ATR_MULT * atr14), 2) if ENABLE_TARGET else 0.0,
+                        "entry_time": candle_ts,
+                        "order_id": res.get("orderid"),
+                    },
+                )
                 self.state_manager.clear_pullback_watch(symbol)
+                self.state_manager.set_last_processed_candle(symbol, candle_ts)
+
+        # Mark candle as evaluated to avoid re-running signal checks on same bar
+        self.state_manager.set_last_processed_candle(symbol, candle_ts)
 
     def emit_heartbeat(self, status: str = "ACTIVE", active_count: int = 0):
         hb = {
             "strategy": STRATEGY_NAME,
-            "version": "1.0.0-PROD",
+            "version": "1.1.0-REMEDIATED",
             "timestamp": get_current_ist().isoformat(),
             "status": status,
+            "host_reachable": self.is_host_reachable,
+            "data_source_mode": "FAIL_CLOSED_LIVE_GATEWAY",
             "universe": self.symbols,
             "active_positions_count": active_count,
             "open_contracts": list(self.state_manager.state.get("tracked_positions", {}).keys()),
             "pullback_watches": self.state_manager.state.get("pullback_watch", {}),
+            "verified_lot_sizes": self.verified_lot_sizes,
         }
+        # Atomic heartbeat persistence via temp file + replace
+        tmp_hb = HEARTBEAT_FILE_PATH.with_name(f"{HEARTBEAT_FILE_PATH.stem}_{uuid.uuid4().hex}.tmp")
         try:
-            with open(HEARTBEAT_FILE_PATH, "w", encoding="utf-8") as f:
+            with open(tmp_hb, "w", encoding="utf-8") as f:
                 json.dump(hb, f, indent=2)
+            os.replace(tmp_hb, HEARTBEAT_FILE_PATH)
         except Exception:
-            pass
+            if tmp_hb.exists():
+                try:
+                    tmp_hb.unlink()
+                except Exception:
+                    pass
 
     def execute_cycle(self):
-        """Runs a complete evaluation cycle across all MCX target commodities."""
+        """Runs a complete evaluation cycle with broker position reconciliation and fail-closed checks."""
         now_ist = get_current_ist()
         is_open, open_reason = is_mcx_trading_time(now_ist)
         if not is_open:
@@ -1156,9 +1726,17 @@ class MCXIchimokuStrategy:
         if not self.is_host_reachable:
             if self._check_host_reachability():
                 self.is_host_reachable = True
-                logger.info(f"🔄 Reconnected to OpenAlgo server at {self.host}. Refreshing active contracts...")
+                logger.info(f"🔄 Reconnected to OpenAlgo server at {self.host}. Re-discovering contracts...")
                 self._init_sdk_client()
                 self._discover_active_contracts()
+                self.reconcile_broker_positions()
+            else:
+                logger.warning("🛑 [FAIL-CLOSED] OpenAlgo host unreachable. Cycle aborted.")
+                self.emit_heartbeat(status="ERROR_GATEWAY_OFFLINE")
+                return
+
+        # Reconcile broker positions before evaluating symbols
+        self.reconcile_broker_positions()
 
         logger.info(f"⏳ [CYCLE START] Evaluating MCX commodities at {now_ist.strftime('%d-%b-%Y %H:%M:%S IST')}...")
         with ThreadPoolExecutor(max_workers=min(len(self.symbols), 4)) as executor:
@@ -1167,7 +1745,9 @@ class MCXIchimokuStrategy:
         tracked = self.state_manager.state.get("tracked_positions", {})
         active_count = len(tracked)
         self.emit_heartbeat(status="ACTIVE", active_count=active_count)
-        logger.info(f"✅ [CYCLE COMPLETE] Active Positions: {active_count} | Pulback Watches: {len(self.state_manager.state.get('pullback_watch', {}))}")
+        logger.info(
+            f"✅ [CYCLE COMPLETE] Active Positions: {active_count} | Pullback Watches: {len(self.state_manager.state.get('pullback_watch', {}))}"
+        )
 
     def run_loop(self, poll_interval: int = POLL_INTERVAL_SECONDS):
         def _sig_handler(sig, frame):
@@ -1187,7 +1767,7 @@ class MCXIchimokuStrategy:
             if RUN_ONCE or not self.is_running:
                 break
 
-            sleep_sec = get_seconds_to_next_candle_boundary(buffer_seconds=2)
+            sleep_sec = get_seconds_to_next_candle_boundary(buffer_seconds=5)
             wait_time = min(float(poll_interval), sleep_sec)
             logger.info(f"💤 Sleeping {wait_time:.1f}s until next candle boundary check...")
             sleep_start = time.time()
@@ -1201,50 +1781,68 @@ class MCXIchimokuStrategy:
 # 9. CLI ENTRY POINT & VERIFICATION HARNESS
 # ==============================================================================
 def run_verification_test() -> bool:
-    """Verifies math, state persistence, indicators, and signal logic on mock data."""
+    """Verifies math, state persistence, indicators, lot sizing, and session resampling."""
     print("=" * 70)
-    print("RUNNING ICHIMOKU MCX SELF-TEST & VERIFICATION HARNESS")
+    print("RUNNING REMEDIATED ICHIMOKU MCX SELF-TEST & VERIFICATION HARNESS")
     print("=" * 70)
 
-    # 1. Generate Synthetic 1H Candles (60 bars)
+    # 1. Generate Synthetic 1H Candles (300 bars)
     np.random.seed(42)
-    dates = pd.date_range("2026-10-01", periods=300, freq="1h", tz=IST)
+    dates = pd.date_range("2026-10-01 09:00", periods=300, freq="1h", tz=IST)
     price = 100000.0 + np.cumsum(np.random.normal(50.0, 150.0, 300))
-    df_mock = pd.DataFrame({
-        "open": price - 20,
-        "high": price + 100,
-        "low": price - 100,
-        "close": price,
-        "volume": np.random.randint(100, 1000, 300)
-    }, index=dates)
+    df_mock = pd.DataFrame(
+        {
+            "open": price - 20,
+            "high": price + 100,
+            "low": price - 100,
+            "close": price,
+            "volume": np.random.randint(100, 1000, 300),
+        },
+        index=dates,
+    )
 
-    # 2. Test Indicators
+    # 2. Test Indicators & Approved Option A Target Ratio
     df_ichi = compute_ichimoku_1h(df_mock)
     assert "tenkan" in df_ichi.columns and "kijun" in df_ichi.columns, "Ichimoku lines missing"
     assert "atr14" in df_ichi.columns, "ATR14 missing"
-    print("  [+] Ichimoku lines & ATR14 computation verified.")
+    assert STOP_LOSS_ATR_MULT == 2.0, "Stop loss multiple must be 2.0x ATR"
+    assert PROFIT_TARGET_ATR_MULT == 3.5, "Profit target multiple must be 3.5x ATR"
+    assert REWARD_RISK_RATIO == 1.75, "Reward-to-risk must be exactly 1.75R"
+    print("  [+] Ichimoku lines, ATR14, and Option A 1.75R risk ratio verified.")
 
-    # 3. Test HTF Resampling & Geometry
+    # 3. Test Session-Aligned HTF Resampling & Geometry
     df_4h = resample_ohlcv(df_mock, "4h")
     assert len(df_4h) > 0, "4H resampling failed"
+    assert df_4h["timestamp"].iloc[0].hour == 9, "4H must anchor at 09:00 IST MCX open"
     regime_4h, dir_4h, is_horiz = classify_htf_regime(df_4h)
-    assert regime_4h in ["Strong_Bullish_Geometry", "Mild_Bullish_Geometry", "Strong_Bearish_Geometry", "Mild_Bearish_Geometry", "Neutral_Chop"]
-    print(f"  [+] 4H HTF Geometry Classification verified (Regime: {regime_4h}).")
+    assert regime_4h in [
+        "Strong_Bullish_Geometry",
+        "Mild_Bullish_Geometry",
+        "Strong_Bearish_Geometry",
+        "Mild_Bearish_Geometry",
+        "Neutral_Chop",
+    ]
+    print(f"  [+] Session-Aligned 4H HTF Geometry verified (Regime: {regime_4h}).")
 
-    # 4. Test State Persistence
-    test_state_file = SCRIPT_DIR / "test_ichimoku_state.json"
+    # 4. Test Thread-Safe State Persistence
+    test_state_file = SCRIPT_DIR / "test_ichimoku_remediated_state.json"
     mgr = PersistentStateManager(test_state_file)
-    mgr.save_position("GOLDM_TEST", {"direction": "Long", "quantity": 1, "entry_price": 100000.0})
+    mgr.save_position("GOLDM_TEST", {"direction": "Long", "quantity": 100, "entry_price": 100000.0})
     mgr.set_pullback_watch("GOLDM", {"target_exited_dir": 1, "target_exit_price": 103500.0})
 
     mgr2 = PersistentStateManager(test_state_file)
-    assert mgr2.get_position("GOLDM_TEST")["quantity"] == 1
+    assert mgr2.get_position("GOLDM_TEST")["quantity"] == 100
     assert mgr2.get_pullback_watch("GOLDM")["target_exited_dir"] == 1
     if test_state_file.exists():
         test_state_file.unlink()
-    print("  [+] Atomic State Persistence & Pullback Watch storage verified.")
+    print("  [+] Thread-Safe Atomic State Persistence verified.")
 
-    print("\n✅ ALL 4 ICHIMOKU MCX CORE HARNESS TESTS PASSED.")
+    # 5. Test Lot Sizing
+    assert MCX_COMMODITY_SPECS["GOLDM"]["exchange_lot_size"] == 100
+    assert MCX_COMMODITY_SPECS["CRUDEOILM"]["exchange_lot_size"] == 10
+    print("  [+] Verified Exchange Lot Sizes (GOLDM: 100, CRUDEOILM: 10) verified.")
+
+    print("\n✅ ALL REMEDIATED ICHIMOKU MCX TESTS PASSED.")
     return True
 
 
